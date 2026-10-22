@@ -1,0 +1,109 @@
+"""Turns results/metrics.json into results/REPORT.md, one section per stage."""
+
+from __future__ import annotations
+
+from .config import path
+
+
+def _table(header: list[str], rows: list[list]) -> str:
+    out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
+    return "\n".join(out)
+
+
+def render(m: dict) -> str:
+    e, lq, d, c = m["emulation"], m["log_quality"], m["detection"], m["correlation"]
+    s = ["# Results report", ""]
+    first = next(iter(m["triage"].values()), None)
+    if first and first["backend"].startswith("stub"):
+        s += ["> **Backend: stub (rule-based stand-in, not AI).** These numbers only show the pipeline "
+              "and controls work. Report results from an `ollama` run.", ""]
+
+    s += ["## 1. Emulation (answer key)", _table(["Metric", "Value"], [
+        ["Attack scenarios / benign scenarios", f"{e['attack_scenarios']} / {e['benign_scenarios']}"],
+        ["Malicious events", e["malicious_events"]],
+        ["Technique execution rate", e["technique_execution_rate"]],
+        ["Label coverage", e["label_coverage"]],
+        ["Malicious events lost to logging gaps", e["malicious_events_lost_to_logging_gaps"]]]), ""]
+
+    s += ["## 2. Log quality", _table(["Source", "Completeness", "Parse success", "Lag p95 (s)", "Unhealthy hours"],
+          [[k, v["completeness"], v["parse_success"], v["lag_p95_seconds"], f"{v['unhealthy_hours']}/{v['hours']}"]
+           for k, v in lq["per_source"].items()]),
+          "", f"Outage hours injected: {lq['outage_hours_injected']} · detected (recall): "
+              f"{lq['outage_detection_recall']} · healthy hours wrongly flagged: {lq['false_unhealthy_hours']}", ""]
+
+    s += ["## 3. Detection", _table(["Rule", "Alerts", "True-positive alerts", "Precision"],
+          [[r, v["alerts"], v["true_positive_alerts"], v["precision"]] for r, v in d["per_rule"].items()]), "",
+          _table(["Technique", "Technique-level", "Tactic", "General", "Telemetry only", "Not observable",
+                  "Recall (signature)", "Recall (+behavioural)"],
+                 [[t, *v["levels"].values(), v["recall_signature_only"], v["recall_with_behavioural"]]
+                  for t, v in d["per_technique"].items()]), "",
+          f"Attack scenarios detected: {d['attack_scenarios_detected']} · benign scenarios alerting: "
+          f"{d['benign_scenarios_alerting']} · alerts on background noise: {d['alerts_on_background_noise']} · "
+          f"incident risk PR-AUC: {d['incident_risk_pr_auc']} · ROC-AUC: {d['incident_risk_roc_auc']}", ""]
+
+    s += ["## 4. TTP correlation", _table(["Metric", "Value"], [
+        ["Incidents", c["incidents"]], ["Attack chains in one incident", c["attack_chains_in_one_incident"]],
+        ["Chain reconstruction accuracy", c["chain_reconstruction_accuracy"]],
+        ["Over-merged incidents", c["over_merged_incidents"]],
+        ["Tactic-order accuracy", c["tactic_order_accuracy"]]]), ""]
+
+    s += ["## 5. Triage: AI alone (baseline) vs AI + controls (assured)"]
+    rows = []
+    for name, t in m["triage"].items():
+        for arm in ("baseline", "assured"):
+            a = t[arm]
+            rows.append([name, arm, f"{a['fn']}", f"{a['false_close_rate']} {a['false_close_rate_ci95']}",
+                         f"{a['f2']} {a['f2_ci95']}", a["recall"], a["precision"], a["mcc"], a["escalation_rate"]])
+    s += [_table(["Run", "Arm", "False closes", "False-close rate [95% CI]", "F2 [95% CI]", "Recall",
+                  "Precision", "MCC", "Escalation rate"], rows), ""]
+
+    for name, t in m["triage"].items():
+        mo, sc, g = t["model"], t["self_correction"], t["gates"]
+        s += [f"### Run `{name}` · backend `{t['backend']}`",
+              _table(["Metric", "Value"], [
+                  ["Schema validity", mo["schema_validity"]],
+                  ["Faithfulness (verified observed claims)", mo["faithfulness_mean"]],
+                  ["Observation ratio (mean)", mo["observation_ratio_mean"]],
+                  ["Hallucinated event IDs", mo["hallucinated_event_ids"]],
+                  ["Technique mapping exact / parent / tactic",
+                   f"{mo['technique_mapping']['exact_match']} / {mo['technique_mapping']['parent_match']} / "
+                   f"{mo['technique_mapping']['tactic_match']}"],
+                  ["Verifier failures → fixed by retry",
+                   f"{sc['verifier_failures_first_answer']} → {sc['fixed_by_retry']} "
+                   f"(decisions made worse: {sc['decisions_made_worse_by_retry']})"],
+                  ["False closes caught by gates", g["false_closes_caught"]],
+                  ["Benign alerts sent to a human by gates", g["benign_alerts_sent_to_human_by_gates"]],
+                  ["Gates fired", ", ".join(f"{k} ({v})" for k, v in g["fired"].items())],
+                  ["Privileged-identity incidents: escalated by AI alone → with controls",
+                   f"{t['privileged_identity']['escalation_rate_ai_alone']} → "
+                   f"{t['privileged_identity']['escalation_rate_with_controls']} "
+                   f"(n={t['privileged_identity']['incidents']}, malicious {t['privileged_identity']['of_which_malicious']})"],
+                  ["Degraded-telemetry incidents: escalated by AI alone → with controls",
+                   f"{t['degraded_telemetry']['escalation_rate_ai_alone']} → "
+                   f"{t['degraded_telemetry']['escalation_rate_with_controls']} "
+                   f"(n={t['degraded_telemetry']['incidents']}, malicious {t['degraded_telemetry']['of_which_malicious']})"],
+                  ["Injection attack success: baseline → assured",
+                   f"{t['adversarial']['attack_success_rate_baseline']} → {t['adversarial']['attack_success_rate_assured']}"],
+                  ["Latency mean / p95 (s)", f"{mo['latency_mean_s']} / {mo['latency_p95_s']}"]]), ""]
+        if "rag" in t:
+            r = t["rag"]
+            s += [f"RAG: hit rate@k {r['hit_rate_at_k']} · MRR {r['mrr']} · context precision "
+                  f"{r['context_precision']} · incidents with poisoned chunk {r['incidents_with_poisoned_chunk']} "
+                  f"(malicious closed: baseline {r['malicious_closed_when_poisoned_baseline']}, assured "
+                  f"{r['malicious_closed_when_poisoned_assured']})", ""]
+        s += [_table(["Scenario variant", "Malicious", "Incidents", "Closed by AI alone", "Closed with controls"],
+                     [[k, v["malicious"], v["n"], v["baseline_closed"], v["assured_closed"]]
+                      for k, v in t["by_scenario_variant"].items()]), ""]
+
+    if "consistency" in m:
+        k = m["consistency"]
+        s += [f"## Consistency (k = {k['k']})", _table(["Arm", "pass^k", "Agreement"],
+              [[a, k[a]["pass_hat_k"], k[a]["agreement"]] for a in ("baseline", "assured")]), ""]
+    return "\n".join(s)
+
+
+def write(m: dict) -> str:
+    text = render(m)
+    (path("results_dir") / "REPORT.md").write_text(text, encoding="utf-8")
+    return text

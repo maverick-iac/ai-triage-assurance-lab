@@ -1,0 +1,77 @@
+# All tunable thresholds live here, so an analyst can change behaviour
+# without touching code. Every value is read by triage_lab/config.py.
+
+paths:
+  data_dir: data
+  rules_dir: rules/sigma
+  drafts_dir: rules/drafts
+  knowledge_dir: knowledge
+  results_dir: results
+
+generator:
+  seed: 7
+  start: "2026-10-01T00:00:00+00:00"
+  days: 10                    # 120 two-hour slots; each scenario gets its own slot
+  attack_scenarios: 40        # labelled malicious chains
+  benign_scenarios: 60        # lookalike benign activity
+  background_per_hour: 10     # normal events per source per hour
+  malformed_rate: 0.004       # share of broken log lines (tests parsing)
+
+pipeline:
+  sources: [email, identity, endpoint, cloud]
+  required_sources: [email, identity, endpoint, cloud]
+  correlation_window_minutes: 60
+  context_padding_minutes: 30
+  max_bundle_events: 40
+
+log_quality:
+  bucket_minutes: 60
+  min_volume_ratio: 0.3       # bucket volume vs median volume for that source
+  weights: {volume: 0.5, completeness: 0.3, parse: 0.2}
+  required_fields:
+    email: [user, fields.sender, fields.subject]
+    identity: [user, src_ip, fields.result]
+    endpoint: [user, host, fields.image, fields.cmdline]
+    cloud: [user, src_ip, fields.bucket, fields.operation]
+
+gates:
+  log_quality_min: 0.6        # any required source below this -> escalate
+  observation_ratio_min: 0.6  # share of claims that are verified observations
+  confidence_min_to_close: 0.7
+  never_close_privileged: true
+  verifier_retries: 1
+  escalate_on_not_determinable: true   # AI said something can't be determined -> a human decides
+  max_risk_to_close: 0.6     # multi-stage incidents above this always go to a human
+  injection_guard: true       # escalate if evidence contains instructions aimed at an AI
+  injection_patterns:
+    - '(?i)\b(ai|llm|assistant|triage)\b.{0,40}\b(classify|mark|close|ignore)\b'
+    - '(?i)\bignore (all |any |previous |prior )?(instructions|rules)\b'
+    - '(?i)\b(classify|mark)\b.{0,30}\bas benign\b'
+
+agent:
+  backend: stub               # stub | ollama | replay
+  model: qwen2.5:3b
+  ollama_url: http://localhost:11434
+  temperature: 0
+  seed: 42
+  timeout_seconds: 180
+  rag_top_k: 3
+
+attack:
+  attack_version: "18"        # pin the ATT&CK version you validated IDs against
+  chain_stage:                # kill-chain order used for TTP correlation
+    T1566.002: 1
+    T1059.001: 2
+    T1078.004: 3
+    T1069.002: 4
+    T1530: 5
+  tactic:
+    T1566.002: initial-access
+    T1059.001: execution
+    T1078.004: initial-access
+    T1069.002: discovery
+    T1530: collection
+
+gap_loop:
+  min_recall: 0.8
+  max_false_positives: 2
