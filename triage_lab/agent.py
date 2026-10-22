@@ -99,6 +99,7 @@ class Agent:
         self.temperature = cfg["temperature"] if temperature is None else temperature
         self.seed = cfg["seed"] + run_index
         self.timeout = cfg["timeout_seconds"]
+        self.num_ctx = cfg.get("num_ctx", 8192)
         self.cache_dir = path("results_dir") / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -140,7 +141,8 @@ class Agent:
         if self.backend == "replay":
             raise FileNotFoundError(f"No cached answer {f.name}; run once with backend=ollama first.")
         payload = {"model": self.model, "messages": messages, "stream": False,
-                   "options": {"temperature": self.temperature, "seed": self.seed}}
+                   "options": {"temperature": self.temperature, "seed": self.seed,
+                               "num_ctx": self.num_ctx}}
         if json_mode:
             payload["format"] = "json"
         body = json.dumps(payload).encode()
