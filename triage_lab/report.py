@@ -51,7 +51,9 @@ def render(m: dict) -> str:
     s += ["## 5. Triage: AI alone (baseline) vs AI + controls (assured)"]
     rows = []
     for name, t in m["triage"].items():
-        for arm in ("baseline", "assured"):
+        for arm in ("baseline", "assured", "critic_only"):
+            if arm not in t:
+                continue
             a = t[arm]
             rows.append([name, arm, f"{a['fn']}", f"{a['false_close_rate']} {a['false_close_rate_ci95']}",
                          f"{a['f2']} {a['f2_ci95']}", a["recall"], a["precision"], a["mcc"], a["escalation_rate"]])
@@ -60,7 +62,8 @@ def render(m: dict) -> str:
 
     for name, t in m["triage"].items():
         mo, sc, g = t["model"], t["self_correction"], t["gates"]
-        s += [f"### Run `{name}` · backend `{t['backend']}`",
+        s += [f"### Run `{name}` · backend `{t['backend']}` · mode `{t['mode']}`"
+              + (" · with critic" if t.get("with_critic") else ""),
               _table(["Metric", "Value"], [
                   ["Schema validity", mo["schema_validity"]],
                   ["Faithfulness (verified observed claims)", mo["faithfulness_mean"]],
@@ -85,7 +88,24 @@ def render(m: dict) -> str:
                    f"(n={t['degraded_telemetry']['incidents']}, malicious {t['degraded_telemetry']['of_which_malicious']})"],
                   ["Injection attack success: baseline → assured",
                    f"{t['adversarial']['attack_success_rate_baseline']} → {t['adversarial']['attack_success_rate_assured']}"],
+                  ["Evidence recall (attack events put in front of the AI)", t.get("evidence_recall_mean")],
                   ["Latency mean / p95 (s)", f"{mo['latency_mean_s']} / {mo['latency_p95_s']}"]]), ""]
+        if "agentic" in t:
+            ag = t["agentic"]
+            s += [_table(["Agentic metric", "Value"], [
+                ["Tool calls per incident (mean)", ag["tool_calls_per_incident_mean"]],
+                ["Invalid tool-call rate", ag["invalid_tool_call_rate"]],
+                ["Fallback to code-built bundle", ag["fallback_rate"]],
+                ["Tools used", ", ".join(f"{k} ({v})" for k, v in ag["tools_used"].items())],
+                ["Off-target tool calls: injected incidents / others",
+                 f"{ag['off_target_calls_injected']} / {ag['off_target_calls_other']}"]]), ""]
+        if "critic" in t:
+            cr = t["critic"]
+            s += [_table(["Critic metric", "Value"], [
+                ["'Close' verdicts reviewed", cr["closes_reviewed"]],
+                ["Valid objections (evidence verified)", cr["valid_objections"]],
+                ["Malicious closes caught / missed", f"{cr['malicious_closes_caught']} / {cr['malicious_closes_missed']}"],
+                ["Benign closes objected to (noise)", cr["benign_closes_objected_to"]]]), ""]
         if "rag" in t:
             r = t["rag"]
             s += [f"RAG: hit rate@k {r['hit_rate_at_k']} · MRR {r['mrr']} · context precision "

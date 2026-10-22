@@ -2,7 +2,8 @@
 
 1. Find malicious events that no signature rule caught (from the answer key).
 2. Draft a Sigma rule for them:
-     backend=ollama  the model writes the YAML from examples of missed and benign events
+     backend=ollama  the model writes the YAML from examples of missed and benign events,
+                     sees its own backtest numbers and revises, up to 3 attempts
      backend=stub    simple rule induction (NOT AI): keep the fields that are identical
                      across the missed events and use the smallest number as a threshold
 3. Backtest the draft on ALL events: recall on that technique, false positives on
@@ -69,14 +70,41 @@ def induce_rule(technique: str, missed: list[Event]) -> dict:
             "detection": {"selection": sel, "condition": "selection"}, "level": "medium"}
 
 
-def llm_rule(agent: Agent, technique: str, missed: list[Event], benign: list[Event]) -> dict:
+def _yaml(raw: str) -> dict:
+    text = re.sub(r"^```(?:yaml)?|```$", "", raw.strip(), flags=re.M)
+    d = yaml.safe_load(text)
+    if not isinstance(d, dict) or "detection" not in d:
+        raise ValueError("model did not return a rule with a 'detection' block")
+    return d
+
+
+def llm_rule(agent: Agent, technique: str, missed: list[Event], benign: list[Event],
+             events: list[Event], attempts: int = 3) -> tuple[dict, dict, list[dict]]:
+    """Agentic drafting: draft -> backtest -> feed the numbers back -> revise (up to `attempts`)."""
+    cfg = settings()["gap_loop"]
     fields = sorted({"event_type", "user"} | {k for e in missed + benign for k in e.fields})
     msg = PROMPT.format(fields=", ".join(fields), technique=technique, technique_tag=technique.lower(),
                         missed="\n".join(json.dumps(e.compact()) for e in missed[:5]),
                         benign="\n".join(json.dumps(e.compact()) for e in benign[:5]))
-    raw = agent.chat([{"role": "user", "content": msg}])
-    text = re.sub(r"^```(?:yaml)?|```$", "", raw.strip(), flags=re.M)
-    return yaml.safe_load(text)
+    messages, history = [{"role": "user", "content": msg}], []
+    draft, bt = None, None
+    for i in range(attempts):
+        raw = agent.chat(messages)
+        try:
+            draft = _yaml(raw)
+            bt = backtest(draft, technique, events)
+        except Exception as exc:  # noqa: BLE001 - feed any problem back to the model
+            bt = {"error": str(exc), "recall": 0.0, "false_positives": None, "matches": 0}
+        history.append({"attempt": i + 1, **{k: bt.get(k) for k in ("recall", "false_positives", "error")}})
+        if "error" not in bt and bt["recall"] >= cfg["min_recall"] and bt["false_positives"] <= cfg["max_false_positives"]:
+            break
+        feedback = (f"Backtest of your rule: {bt.get('error') or ''} recall {bt['recall']} "
+                    f"(need >= {cfg['min_recall']}), false positives {bt.get('false_positives')} "
+                    f"(need <= {cfg['max_false_positives']}). Revise the rule. Reply with only the YAML.")
+        messages += [{"role": "assistant", "content": raw}, {"role": "user", "content": feedback}]
+    if draft is None:
+        raise ValueError("no usable rule after all attempts")
+    return draft, bt, history
 
 
 def backtest(rule_yaml: dict, technique: str, events: list[Event]) -> dict:
@@ -100,9 +128,13 @@ def run(backend: str | None = None) -> list[dict]:
         labels = {l["event_id"]: l for l in read_jsonl(path("data_dir") / "labels.jsonl") if l["event_id"]}
         benign = [e for e in benign if not labels.get(e.id, {}).get("malicious")]
         try:
-            draft = induce_rule(technique, missed) if agent.backend == "stub" else \
-                llm_rule(agent, technique, missed, benign)
-            bt = backtest(draft, technique, events)
+            if agent.backend == "stub":
+                draft, attempts = induce_rule(technique, missed), [{"attempt": 1}]
+                bt = backtest(draft, technique, events)
+            else:
+                draft, bt, attempts = llm_rule(agent, technique, missed, benign, events)
+        except FileNotFoundError:
+            raise
         except Exception as exc:  # a malformed model answer is a result, not a crash
             results.append({"technique": technique, "missed": len(missed), "accepted": False,
                             "error": str(exc)})
@@ -115,6 +147,7 @@ def run(backend: str | None = None) -> list[dict]:
         name = f"draft_{technique.replace('.', '_').lower()}_{'pass' if accepted else 'fail'}.yml"
         (path("drafts_dir") / name).write_text(yaml.safe_dump(draft, sort_keys=False), encoding="utf-8")
         results.append({"technique": technique, "missed": len(missed), "draft": name,
-                        "selection": draft["detection"]["selection"], **bt, "accepted": accepted})
+                        "selection": draft["detection"].get("selection"), **bt, "accepted": accepted,
+                        "attempts": attempts})
     (path("results_dir") / "gap_loop.json").write_text(json.dumps(results, indent=2, default=str))
     return results

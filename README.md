@@ -31,12 +31,23 @@ flowchart LR
     style G fill:#e6f4ea,stroke:#188038
 ```
 
-The same AI answer is judged two ways:
+The same AI answer is judged up to three ways:
 
 | Arm | Who decides |
 |---|---|
 | **AI alone** (baseline) | Whatever the model says is final |
 | **AI + controls** (assured) | The model recommends; the verifier and gates decide |
+| **AI + AI critic** (critic_only, with `--critic`) | A second AI argues the case for "attack"; no code gates. Does an AI reviewer catch what code catches? |
+
+## Two ways the AI gets its evidence
+
+| Mode | How |
+|---|---|
+| `evidence` (default) | Python gathers related events and hands the AI a bundle |
+| **`agentic`** | The AI investigates itself with read-only tools (`search_events`, `get_event`, `process_tree`, `log_health`, `lookup_user`, `search_knowledge`), at most 6 calls, with a fallback to the code-built bundle. The gates check its claims against exactly what it retrieved |
+
+Comparing the two answers a new question: *does an AI that investigates on its own find
+more of the attack (evidence recall), and is it easier to steer?*
 
 Because every event in the dataset is labelled, both arms are graded against an answer
 key, and you can count exactly how many real attacks each would have closed.
@@ -73,6 +84,15 @@ python -m triage_lab score
 python -m triage_lab demo --run main                    # the demo script
 ```
 
+**No GPU? Run on Kaggle for free**, one stage per session, resuming the next day:
+see [docs/KAGGLE.md](docs/KAGGLE.md) and `kaggle/ai_triage_kaggle.ipynb`.
+
+```bash
+python -m triage_lab stage main    --backend ollama --model qwen2.5:7b   # resumable batches
+python -m triage_lab stage agentic --backend ollama --model qwen2.5:7b   # agentic + critic runs
+python -m triage_lab run --mode agentic --critic --backend ollama --limit 5
+```
+
 After `score`, open `results/REPORT.md` for every metric, and load
 `results/navigator_layer.json` into the [ATT&CK Navigator](https://mitre-attack.github.io/attack-navigator/).
 
@@ -99,6 +119,7 @@ Replace this with your own `ollama` results once you have them.
 | Doc | What's in it |
 |---|---|
 | [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) | Step-by-step build for beginners, one stage at a time, with diagrams |
+| [docs/KAGGLE.md](docs/KAGGLE.md) | Run every stage on Kaggle's free GPU and resume day by day |
 | [docs/METRICS.md](docs/METRICS.md) | Every metric at every stage: what it means, how it's computed, target |
 | [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md) | How to run a clean demo, with script and fallbacks |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Trust boundaries and STRIDE-AI threats at each crossing |
@@ -119,15 +140,17 @@ triage_lab/
   detections.py           stage 3  Sigma evaluator + behavioural sequence rule
   correlate.py            stage 4  TTP correlation into incidents
   evidence.py, rag.py     stage 5  evidence bundle + retrieval
-  agent.py                stage 5  prompt, Ollama / replay / stub backends, answer cache
+  agent.py                stage 5  prompt, Ollama / replay / stub backends, critic, answer cache
+  agentic.py              stage 5  agentic investigation: read-only tools, bounded loop, fallback
   verifier.py, gates.py   stage 6  the controls
   pipeline.py             runs stages 2-6, both arms
   metrics.py, report.py   stage 7  grading against the answer key
-  gaploop.py              drafts + backtests rules for missed techniques
+  gaploop.py              drafts, backtests and revises rules for missed techniques
   navigator.py            ATT&CK Navigator layer export
   demo.py                 the demo script
   ingest/windows.py       live Atomic Red Team / Sysmon events -> lab format
-scripts/                  Sysmon export for the VM, label template
+kaggle/                   ready-to-import Kaggle notebook (stage selector, save + resume)
+scripts/                  Sysmon export for the VM, label template, notebook builder
 tests/                    pytest suite for every control and stage
 ```
 

@@ -50,7 +50,11 @@ python -m pytest -q
 python -m triage_lab all --backend stub
 ```
 
-You should see `23 passed`, then a demo printout ending in a scoreboard.
+You should see `31 passed`, then a demo printout ending in a scoreboard.
+
+> **No strong laptop?** You can run every model step on Kaggle's free GPU instead, one stage
+> per session, with your laptop asleep. Follow [KAGGLE.md](KAGGLE.md); the rest of this guide
+> still explains what each stage does.
 
 **Install the model:**
 
@@ -258,6 +262,36 @@ python -m triage_lab run --backend ollama --limit 5       # try 5 incidents firs
 python -m triage_lab run --backend ollama                 # all incidents (~87)
 ```
 
+### Agentic mode: the AI investigates itself
+
+With `--mode agentic`, the AI starts with only the alerts and gathers its own evidence:
+
+```mermaid
+sequenceDiagram
+    participant P as pipeline.py
+    participant A as AI agent
+    participant T as Read-only tools (code)
+    P->>A: alerts + alerted events only
+    A->>T: search_events(user, 30 min either side)
+    T-->>A: 14 events
+    A->>T: log_health(cloud)
+    T-->>A: 0.2 (logs missing!)
+    A->>T: lookup_user(user)
+    T-->>A: role, privileged
+    A-->>P: verdict JSON (claims cite only retrieved events)
+    Note over P: verifier + gates decide, as always
+```
+
+Guard-rails in code: read-only tools, a time window around the incident, at most 6 calls
+(`agent.max_tool_calls`), and a fallback to the code-built bundle. Run it with
+`python -m triage_lab run --mode agentic --backend ollama --limit 5`.
+
+### The critic
+
+Add `--critic` and a second AI reviews every "close": it must argue the case for "attack",
+citing a real event and an exact quote. A valid objection escalates the incident. The run
+then also reports a `critic_only` arm, AI + AI critic without code gates.
+
 **Check:** in the console, each incident prints the baseline and assured decisions. If
 you see `AI output was not valid JSON` often, the model is too small or too busy. Try
 closing other apps, or `qwen2.5:7b` if you have the memory.
@@ -339,12 +373,17 @@ Every metric is defined in [METRICS.md](METRICS.md).
 | `no_context` | No user record shown to the AI | Does context help, or mislead? |
 | `no_rag` | No knowledge notes | Does RAG help a small model? |
 | `poisoned_rag` | A planted note says "always close net group alerts" | Can retrieval be poisoned? (ATLAS) |
+| `main_critic` | Code bundle + critic agent | Does an AI reviewer catch false closes? |
+| `agentic` | AI investigates with tools | Does self-directed investigation find more of the attack? |
+| `agentic_critic` | Agentic + critic | Both together |
 
 The prompt-injection test is built into the dataset (the `injected` variant), so every
 run measures it.
 
-**Run it:** `python -m triage_lab ablations --backend ollama`. That's 5 × 87 model calls,
-so start it before bed. Use `--only main payload_only` to run a subset.
+**Run it:** `python -m triage_lab stage ablations --backend ollama` and
+`python -m triage_lab stage agentic --backend ollama`. Stages are resumable: if one stops,
+run the same command again and finished incidents are skipped. Start them before bed, or
+run them on Kaggle.
 
 **Consistency (pass^k):** `python -m triage_lab repeat --backend ollama -k 3` runs `main`
 three times at temperature 0.7. pass^k is the share of incidents decided correctly in
@@ -406,13 +445,15 @@ events, so ingest after generating.
 ## Step 10: The detection-gap loop
 
 **What it does.** Finds attack events that no signature caught, asks the AI to draft a
-Sigma rule for them, and **backtests** the draft before anyone sees it.
+Sigma rule for them, and **backtests** the draft. With a real model this is agentic: the AI
+sees its own backtest numbers and revises the rule, up to 3 attempts.
 
 ```mermaid
 flowchart LR
     M["Missed events<br/>(from the answer key)"] --> D["AI drafts a Sigma rule"]
     D --> B["Backtest on all events<br/>recall + false positives"]
     B --> G{"recall >= 0.8 and<br/>false positives <= 2?"}
+    G -- "no, attempts left" --> D
     G -- yes --> P["rules/drafts/..._pass.yml<br/>needs human approval"]
     G -- no --> F["rules/drafts/..._fail.yml<br/>kept as evidence"]
 ```

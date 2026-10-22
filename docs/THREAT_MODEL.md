@@ -62,6 +62,7 @@ so the zones stay in reading order.
 | 7 | Triage agent -> Verifier and gates | Elevation of Privilege | Jailbroken or hallucinating model tries to close an alert on fabricated evidence | JSON schema; citation verifier; observation-ratio gate; the model cannot close directly | Faithfulness; observation ratio; false-close rate |
 | 8 | Close or escalate -> Analyst | Repudiation | Decision recorded without its evidence or reason | Each run row stores the verdict, verifier result and every gate reason | Case completeness; override rate |
 | 9 | Analyst -> RAG store and regression set | Tampering | A bad override persists once embedded and steers future verdicts | Overrides reviewed before ingestion | Override regression pass rate (roadmap) |
+| 10 | Agentic mode: Triage agent -> investigation tools | Elevation of Privilege | Excessive agency: injected text steers the agent's tool calls (other users, wrong time window) or makes it act | Tools are read-only, limited to the incident's time neighbourhood, capped at 6 calls; gates read log health and identity themselves | Off-target tool calls on injected vs other incidents |
 
 **Denial of Service at entry point 1.** An alert flood or very long field values can
 exhaust the local model on an 8 GB laptop. Controls: `max_bundle_events` caps what the

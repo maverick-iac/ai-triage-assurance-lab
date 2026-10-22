@@ -16,6 +16,15 @@ def settings() -> dict:
         return yaml.safe_load(fh)
 
 
+def override(dotted: str, value) -> None:
+    """Change one setting for this process, e.g. override('agent.model', 'qwen2.5:7b')."""
+    node = settings()
+    *parents, leaf = dotted.split(".")
+    for p in parents:
+        node = node[p]
+    node[leaf] = value
+
+
 def path(key: str) -> Path:
     p = ROOT / settings()["paths"][key]
     p.mkdir(parents=True, exist_ok=True)

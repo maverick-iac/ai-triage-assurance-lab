@@ -59,12 +59,21 @@ def main(run_name: str = "main") -> str:
             full_id = r["incident_id"]
             out.insert(len(out) - 1, f"   evidence check: {r['check_final']['verified_observed']} observed claims "
                                      f"verified, observation ratio {r['check_final']['observation_ratio']}")
+        if r.get("trajectory"):
+            steps = " -> ".join(f"{t['tool']}({', '.join(f'{k}={v}' for k, v in t['args'].items())})"
+                                for t in r["trajectory"])
+            out.insert(len(out) - 1, f"   agent investigated: {steps[:220]}")
+        if r.get("critic_review"):
+            cr = r["critic_review"]
+            out.insert(len(out) - 1, f"   critic: {'OBJECTS' if r['critic_objection_valid'] else 'no valid objection'}"
+                                     f" - {cr.get('argument', '')[:110]}")
         if variant == "injected" and full_id:
             out += _tamper_case(full_id)
 
     m = score([run_name], write=False)
     t = m["triage"][run_name]
     b, a = t["baseline"], t["assured"]
+    c = t.get("critic_only")
     out += [_bar(f"SCOREBOARD - all {t['incidents']} incidents"),
             f"{'':38}{'AI alone':>14}{'AI + controls':>16}",
             f"{'Real attacks wrongly closed':38}{b['fn']:>14}{a['fn']:>16}",
@@ -73,6 +82,8 @@ def main(run_name: str = "main") -> str:
             f"{'Sent to a human (escalation rate)':38}{b['escalation_rate']:>14}{a['escalation_rate']:>16}",
             f"{'Injection attack success rate':38}{t['adversarial']['attack_success_rate_baseline']!s:>14}"
             f"{t['adversarial']['attack_success_rate_assured']!s:>16}",
+            *([f"{'AI + AI critic only (no code gates)':38}{'':>14}{c['fn']:>16}  real attacks wrongly closed"]
+              if c else []),
             "",
             f"Trade-off: controls sent {t['gates']['benign_alerts_sent_to_human_by_gates']} extra benign "
             f"incidents to a human to catch {t['gates']['false_closes_caught']} false closes."]
