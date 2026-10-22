@@ -49,9 +49,10 @@ TEMP = "/kaggle/temp"        # scratch space, not saved
 import glob, os, shutil, subprocess, sys, time, json
 from pathlib import Path
 
-for f in glob.glob(f"{INPUT_ROOT}/**/triage_lab/agentic.py", recursive=True) or [None]:
-    assert f, ("The attached dataset holds an OLD version of the project (no agentic mode). "
-               "Upload the latest zip as a New Version of the dataset, then update the input.")
+if not GITHUB_URL and glob.glob(f"{INPUT_ROOT}/**/triage_lab/__init__.py", recursive=True):
+    assert glob.glob(f"{INPUT_ROOT}/**/triage_lab/agentic.py", recursive=True), (
+        "The attached dataset holds an OLD version of the project (no agentic mode). "
+        "Upload the latest zip as a New Version of the dataset, then update the input.")
 
 PROJECT = Path(TEMP) / "ai-triage-assurance-lab"     # code lives outside the saved Output
 Path(TEMP).mkdir(parents=True, exist_ok=True)
