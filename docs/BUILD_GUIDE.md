@@ -50,7 +50,7 @@ python -m pytest -q
 python -m triage_lab all --backend stub
 ```
 
-You should see `31 passed`, then a demo printout ending in a scoreboard.
+You should see `35 passed`, then a demo printout ending in a scoreboard.
 
 > **No strong laptop?** You can run every model step on Kaggle's free GPU instead, one stage
 > per session, with your laptop asleep. Follow [KAGGLE.md](KAGGLE.md); the rest of this guide
@@ -262,6 +262,21 @@ python -m triage_lab run --backend ollama --limit 5       # try 5 incidents firs
 python -m triage_lab run --backend ollama                 # all incidents (~87)
 ```
 
+### Relevance: why does this alert matter?
+
+Two more kinds of context, both computed by code from data a SOC already has:
+
+- **Asset context** (`data/assets.csv`): owner, criticality and crown-jewel status of every
+  host and bucket. `finance-reports` is the crown jewel.
+- **Known-benign baseline** (`triage_lab/context.py`): for each alerted event, has this user
+  done exactly this in the 7 days before? For example, *bucket + client* =
+  `finance-reports / Microsoft Excel` seen 3 times before (routine), versus
+  `finance-reports / python-requests` never seen (new).
+
+The AI can cite these facts with `event_ids: ["ASSET"]` or `["BASELINE"]`, and the
+verifier checks those quotes too. It must also give an **alternative hypothesis**: the
+strongest other explanation and what would rule it out.
+
 ### Agentic mode: the AI investigates itself
 
 With `--mode agentic`, the AI starts with only the alerts and gathers its own evidence:
@@ -315,7 +330,9 @@ flowchart TB
     C3 -- no --> ESC
     C3 -- yes --> C4{"Not a privileged identity?"}
     C4 -- no --> ESC
-    C4 -- yes --> C5{"No AI-directed text<br/>in the evidence?"}
+    C4 -- yes --> C4b{"Not a crown jewel with<br/>first-seen behaviour?"}
+    C4b -- no --> ESC
+    C4b -- yes --> C5{"No AI-directed text<br/>in the evidence?"}
     C5 -- no --> ESC
     C5 -- yes --> C6{"Risk below ceiling<br/>and confidence high?"}
     C6 -- no --> ESC
@@ -359,6 +376,10 @@ escalation). Each comes with a 95% bootstrap confidence interval: with roughly 8
 incidents, small differences can be noise, and the interval shows how much.
 
 Every metric is defined in [METRICS.md](METRICS.md).
+
+`score` also writes a **handover case file** per incident to `results/cases/<run>/`: what an
+analyst receives instead of a raw alert. Open one, for example
+`results/cases/main/INC-0002.md`. Regenerate them any time with `python -m triage_lab cases`.
 
 ---
 

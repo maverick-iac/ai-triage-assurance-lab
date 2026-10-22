@@ -63,6 +63,7 @@ def main(run_name: str = "main") -> str:
             steps = " -> ".join(f"{t['tool']}({', '.join(f'{k}={v}' for k, v in t['args'].items())})"
                                 for t in r["trajectory"])
             out.insert(len(out) - 1, f"   agent investigated: {steps[:220]}")
+        out.insert(len(out) - 1, f"   case file: results/cases/{run_name}/{r['incident_id']}.md")
         if r.get("critic_review"):
             cr = r["critic_review"]
             out.insert(len(out) - 1, f"   critic: {'OBJECTS' if r['critic_objection_valid'] else 'no valid objection'}"

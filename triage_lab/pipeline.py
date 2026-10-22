@@ -22,6 +22,7 @@ from dataclasses import asdict
 
 from .agent import Agent, retry_prompt
 from .agentic import investigate
+from .context import Baseline
 from .config import path, settings
 from .correlate import correlate
 from .detections import detect
@@ -61,6 +62,7 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
     retriever = Retriever(poison=poison) if rag else None
     agent = Agent(backend, temperature, run_index)
     retries = settings()["gates"]["verifier_retries"]
+    baseline = Baseline(events)
 
     out = path("results_dir") / "runs"
     out.mkdir(parents=True, exist_ok=True)
@@ -82,7 +84,7 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
                 done[key]["incident_id"] = inc.id
                 continue
             row = _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
-                              alerts_by_id, lq, users, retriever, name)
+                              alerts_by_id, lq, users, retriever, name, baseline)
             fh.write(json.dumps(row) + "\n")
             fh.flush()
             row["incident_key"] = key
@@ -101,15 +103,15 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
 
 
 def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
-                alerts_by_id, lq, users, retriever, name) -> dict:
+                alerts_by_id, lq, users, retriever, name, baseline=None) -> dict:
     def code_bundle(m="evidence"):
         return build_bundle(inc, alerts_by_id, events, events_by_id, lq, users, retriever,
-                            mode=m, with_context=context)
+                            mode=m, with_context=context, baseline=baseline)
 
     trajectory, invalid_calls, fallback, off_target = [], 0, False, 0
     if mode == "agentic":
         res = investigate(agent, inc, alerts_by_id, events, events_by_id, lq, users, retriever, context,
-                          code_bundle)
+                          code_bundle, baseline)
         bundle, v0, raw0, secs = res["bundle"], res["verdict"], res["raw"], res["seconds"]
         trajectory, invalid_calls, fallback, off_target = (res["trajectory"], res["invalid_tool_calls"],
                                                            res["fallback"], res["off_target_calls"])
@@ -154,6 +156,13 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
         "context_used": v0.get("context_used", []) if v0 else [],
         "not_determinable": v0.get("not_determinable", []) if v0 else [],
         "summary": v0.get("summary", "") if v0 else raw0[:300],
+        "verdict": (v or {}).get("verdict"),
+        "claims_final": (v or {}).get("claims", []),
+        "alternative_hypothesis": (v or {}).get("alternative_hypothesis", ""),
+        "relevance_cited": any(i in ("ASSET", "BASELINE") for cl in (v or {}).get("claims", []) if isinstance(cl, dict)
+                               for i in (cl.get("event_ids") or [])),
+        "assets_touched": bundle["gate_context"]["assets"],
+        "first_seen": [c for c in bundle["gate_context"]["baseline"]["first_seen_checks"] if not c["seen_before"]],
         "check_first": c0, "check_final": c, "retried": used_retry,
         "final_model_decision": v["decision"] if v else "escalate",
         "baseline": baseline, "assured": assured, "gate_reasons": reasons,

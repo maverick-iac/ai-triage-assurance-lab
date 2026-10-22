@@ -9,6 +9,7 @@
   score                    stage 7: metrics.json + REPORT.md + Navigator layer
   demo                     the demo script
   gaploop                  draft, backtest and refine rules for missed techniques
+  cases                    write a readable handover case file per incident (results/cases/<run>/)
   ingest-windows           add live Atomic Red Team / Sysmon events
   all                      generate + every run + gaploop + score + demo
 
@@ -79,6 +80,8 @@ def main(argv: list[str] | None = None) -> None:
     d = sub.add_parser("demo")
     d.add_argument("--run", default="main")
     sub.add_parser("gaploop", parents=[common])
+    cs = sub.add_parser("cases")
+    cs.add_argument("--run", nargs="*", help="run names (default: every run)")
     w = sub.add_parser("ingest-windows")
     w.add_argument("--events", required=True)
     w.add_argument("--labels", required=True)
@@ -116,6 +119,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd in ("demo", "all"):
         from .demo import main as demo
         print(demo(getattr(args, "run", "main")))
+    if args.cmd == "cases":
+        _cases(args.run)
     if args.cmd == "ingest-windows":
         from pathlib import Path
 
@@ -172,8 +177,20 @@ def _score() -> None:
     m = score(names, repeats or None)
     export(m)
     write(m)
+    _cases(names, quiet=True)
     print(f"Wrote results/metrics.json, results/REPORT.md, results/navigator_layer.json "
           f"({len(names)} runs scored{', ' + str(len(repeats)) + ' repeats' if repeats else ''})")
+
+
+def _cases(names=None, quiet: bool = False) -> None:
+    from .casefile import write_cases
+    from .config import path
+    runs_dir = path("results_dir") / "runs"
+    names = names or sorted(p.stem for p in runs_dir.glob("*.jsonl") if not p.stem.startswith("repeat_"))
+    for n in names:
+        k = write_cases(n)
+        if not quiet:
+            print(f"wrote {k} case files to results/cases/{n}/")
 
 
 if __name__ == "__main__":

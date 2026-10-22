@@ -9,10 +9,17 @@ mostly on inference is a guess, not an observation.
 
 from __future__ import annotations
 
+import json
+
 
 def verify(verdict: dict, bundle: dict) -> dict:
     # raw field values joined, so quotes containing " or \ match exactly as shown
     events = {e["id"]: " | ".join(str(v) for v in e.values()).lower() for e in bundle["events"]}
+    # asset and baseline facts the AI was shown can be cited too, as "ASSET" / "BASELINE"
+    if bundle.get("assets"):
+        events["ASSET"] = json.dumps(bundle["assets"]).lower()
+    if bundle.get("baseline"):
+        events["BASELINE"] = json.dumps(bundle["baseline"]).lower()
     observed, verified, hallucinated_ids, failures = 0, 0, 0, []
     claims = [c for c in verdict.get("claims", []) if isinstance(c, dict)]
     for c in claims:

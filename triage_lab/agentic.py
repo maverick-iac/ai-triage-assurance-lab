@@ -9,6 +9,8 @@ alerts and the alerted events, then decides what to look at:
   log_health       is a log source healthy in the incident window?
   lookup_user      the identity record (role, privileged)
   search_knowledge RAG notes (only when RAG is on)
+  lookup_asset     owner, criticality and crown-jewel status of a host or bucket
+  user_baseline    has this user done the same thing in the 7 days before?
 
 Guard-rails (all in code, not up to the model):
   * tools are read-only and limited to the incident's time neighbourhood
@@ -69,6 +71,14 @@ TOOLS = [
         "name": "lookup_user", "description": "Identity record for a user: role, department, privileged.",
         "parameters": {"type": "object", "properties": {"user": {"type": "string"}}, "required": ["user"]}}},
     {"type": "function", "function": {
+        "name": "lookup_asset", "description": "Owner, criticality and crown-jewel status of a host or cloud bucket.",
+        "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {
+        "name": "user_baseline",
+        "description": "What is normal for this user: activity in the 7 days before the incident, and whether each "
+                       "alerted behaviour (country/device, bucket/client, process/parent, link domain) was seen before.",
+        "parameters": {"type": "object", "properties": {"user": {"type": "string"}}, "required": ["user"]}}},
+    {"type": "function", "function": {
         "name": "search_knowledge", "description": "Search triage notes about ATT&CK techniques.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
 ]
@@ -76,7 +86,7 @@ TOOLS = [
 
 class Toolbox:
     def __init__(self, inc: Incident, events: list[Event], events_by_id: dict, lq: LogQuality,
-                 users: dict, retriever: Retriever | None, with_context: bool):
+                 users: dict, retriever: Retriever | None, with_context: bool, gate_ctx: dict | None = None):
         self.inc, self.events, self.by_id, self.lq = inc, events, events_by_id, lq
         self.users, self.retriever, self.with_context = users, retriever, with_context
         self.start = datetime.fromisoformat(inc.start)
@@ -84,9 +94,12 @@ class Toolbox:
         self.seen: dict[str, dict] = {}          # every event the agent has been shown
         self.knowledge: list[dict] = []
         self.used_context = False
+        self.gate_ctx = gate_ctx or {"assets": {}, "baseline": None}
+        self.assets: dict = {}
+        self.baseline: dict | None = None
 
     def available(self) -> list[dict]:
-        names = {"search_events", "get_event", "process_tree", "log_health"}
+        names = {"search_events", "get_event", "process_tree", "log_health", "lookup_asset", "user_baseline"}
         if self.with_context:
             names.add("lookup_user")
         if self.retriever:
@@ -134,6 +147,17 @@ class Toolbox:
                 self.used_context = True
                 rec = self.users.get(str(args.get("user")))
                 return {"user": args.get("user"), "record": {k: v for k, v in rec.items() if k != "user"} if rec else None}
+            if name == "lookup_asset":
+                from .context import load_assets
+                rec = load_assets().get(str(args.get("name")))
+                if rec:
+                    self.assets[rec["asset"]] = {k: v for k, v in rec.items() if k != "asset"}
+                return {"asset": args.get("name"), "record": self.assets.get(str(args.get("name")))}
+            if name == "user_baseline":
+                if str(args.get("user")) != self.inc.user:
+                    return {"error": "baseline is only available for the incident's user"}
+                self.baseline = self.gate_ctx["baseline"]
+                return self.baseline
             if name == "search_knowledge":
                 chunks = self.retriever.search(str(args.get("query", "")), settings()["agent"]["rag_top_k"])
                 found = [{"doc": c.doc, "section": c.heading, "text": c.text} for c in chunks]
@@ -161,11 +185,13 @@ def _text_tool_call(content: str):
 
 def investigate(agent: Agent, inc: Incident, alerts_by_id: dict[str, Alert], events: list[Event],
                 events_by_id: dict, lq: LogQuality, users: dict, retriever: Retriever | None,
-                with_context: bool, fallback_bundle) -> dict:
+                with_context: bool, fallback_bundle, baseline=None) -> dict:
     """Run the bounded tool loop. Returns verdict, the evidence bundle the verifier
     should use, the trajectory and bookkeeping."""
     max_calls = settings()["agent"].get("max_tool_calls", 6)
-    box = Toolbox(inc, events, events_by_id, lq, users, retriever, with_context)
+    from .evidence import gate_context
+    gate_ctx = gate_context(inc, [events_by_id[e] for e in inc.event_ids if e in events_by_id], events, baseline)
+    box = Toolbox(inc, events, events_by_id, lq, users, retriever, with_context, gate_ctx)
     alerts = [alerts_by_id[a] for a in inc.alert_ids]
     alerted = box._show([events_by_id[e] for e in inc.event_ids if e in events_by_id])
     hosts = sorted({e["host"] for e in alerted if e.get("host")})
@@ -180,7 +206,8 @@ def investigate(agent: Agent, inc: Incident, alerts_by_id: dict[str, Alert], eve
 
     if agent.backend == "stub":                      # scripted, deterministic: wiring and tests only
         script = [("search_events", {"user": inc.user, "minutes_before": 30, "minutes_after": 30}),
-                  ("log_health", {"source": "endpoint"}), ("log_health", {"source": "cloud"})]
+                  ("log_health", {"source": "endpoint"}), ("log_health", {"source": "cloud"}),
+                  ("user_baseline", {"user": inc.user})]
         if with_context:
             script.append(("lookup_user", {"user": inc.user}))
         for name, args in script:
@@ -248,4 +275,6 @@ def _bundle(box: Toolbox, inc: Incident, alerts: list[Alert], lq: LogQuality, us
         "log_health": lq.window_scores(lo, hi),      # gates always use the code's own health check
         "user_context": {k: v for k, v in ctx.items() if k != "user"} if ctx else None,
         "knowledge": box.knowledge, "mode": "agentic",
+        "assets": box.assets or None, "baseline": box.baseline,     # only what the agent looked up
+        "gate_context": box.gate_ctx,
     }

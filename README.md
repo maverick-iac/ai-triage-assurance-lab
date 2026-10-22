@@ -46,7 +46,14 @@ The same AI answer is judged up to three ways:
 | `evidence` (default) | Python gathers related events and hands the AI a bundle |
 | **`agentic`** | The AI investigates itself with read-only tools (`search_events`, `get_event`, `process_tree`, `log_health`, `lookup_user`, `search_knowledge`), at most 6 calls, with a fallback to the code-built bundle. The gates check its claims against exactly what it retrieved |
 
-Comparing the two answers a new question: *does an AI that investigates on its own find
+In both modes the AI also gets **relevance context**: the asset's owner and criticality
+(`data/assets.csv`) and a **known-benign baseline** (has this user done exactly this in the
+last 7 days?). It can cite those facts as evidence, and must state an **alternative
+hypothesis** before deciding. Every incident ends as a **handover case file**
+(`results/cases/<run>/INC-xxxx.md`): decision, verified evidence, why it matters, what the
+agent checked, the critic's view, and next steps for the analyst.
+
+Comparing the two modes answers a new question: *does an AI that investigates on its own find
 more of the attack (evidence recall), and is it easier to steer?*
 
 Because every event in the dataset is labelled, both arms are graded against an answer
@@ -61,6 +68,7 @@ key, and you can count exactly how many real attacks each would have closed.
 | Not determinable | The AI itself lists something it couldn't determine, and what data would settle it | Closing with known gaps |
 | Log quality | A log source the decision depends on is silent or broken | Missing data read as "nothing happened" |
 | Privileged identity | The user is an admin or service account | Context talking the AI out of an alert |
+| Crown jewel + first seen | The incident touches a crown-jewel asset (`data/assets.csv`) **and** the behaviour is new for this user (7-day baseline) | Closing the one alert that matters most |
 | Prompt-injection guard | Evidence contains text addressed to an AI | Attacker instructions hidden in data |
 | Risk ceiling | The incident spans several attack stages | Auto-closing a multi-stage chain |
 | Confidence | The model is unsure | Low-confidence closes |
@@ -130,6 +138,7 @@ Replace this with your own `ollama` results once you have them.
 ```
 config/settings.yaml      every threshold and option (change behaviour without code)
 data/users.csv            identity records used for user context and the privileged gate
+data/assets.csv           asset inventory: owner, criticality, crown jewels
 rules/sigma/              five Sigma detection rules
 rules/drafts/             rules drafted by the gap loop, waiting for human approval
 knowledge/                RAG notes per ATT&CK technique + triage principles
@@ -142,6 +151,8 @@ triage_lab/
   evidence.py, rag.py     stage 5  evidence bundle + retrieval
   agent.py                stage 5  prompt, Ollama / replay / stub backends, critic, answer cache
   agentic.py              stage 5  agentic investigation: read-only tools, bounded loop, fallback
+  context.py              stage 5  asset context + known-benign user baseline (first-seen checks)
+  casefile.py             handover output: one Markdown case file per incident
   verifier.py, gates.py   stage 6  the controls
   pipeline.py             runs stages 2-6, both arms
   metrics.py, report.py   stage 7  grading against the answer key

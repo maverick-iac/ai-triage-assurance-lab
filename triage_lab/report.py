@@ -89,6 +89,8 @@ def render(m: dict) -> str:
                   ["Injection attack success: baseline → assured",
                    f"{t['adversarial']['attack_success_rate_baseline']} → {t['adversarial']['attack_success_rate_assured']}"],
                   ["Evidence recall (attack events put in front of the AI)", t.get("evidence_recall_mean")],
+                  ["Verdicts citing asset or baseline facts", mo.get("relevance_citation_rate")],
+                  ["Verdicts with an alternative hypothesis", mo.get("alternative_hypothesis_rate")],
                   ["Latency mean / p95 (s)", f"{mo['latency_mean_s']} / {mo['latency_p95_s']}"]]), ""]
         if "agentic" in t:
             ag = t["agentic"]

@@ -41,6 +41,7 @@ gates:
   never_close_privileged: true
   verifier_retries: 1
   escalate_on_not_determinable: true   # AI said something can't be determined -> a human decides
+  crown_jewel_first_seen: true         # crown-jewel asset + behaviour new for this user -> a human decides
   max_risk_to_close: 0.6     # multi-stage incidents above this always go to a human
   injection_guard: true       # escalate if evidence contains instructions aimed at an AI
   injection_patterns:

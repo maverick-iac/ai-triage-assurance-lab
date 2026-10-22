@@ -53,6 +53,12 @@ def apply_gates(verdict: dict | None, check: dict | None, bundle: dict) -> tuple
     unknowns = [str(x) for x in verdict.get("not_determinable") or [] if str(x).strip()]
     if g.get("escalate_on_not_determinable", True) and unknowns:
         reasons.append(f"not determinable: {unknowns[0][:80]}")
+    gc = bundle.get("gate_context") or {}
+    if g.get("crown_jewel_first_seen", True):
+        jewels = [a for a, rec in (gc.get("assets") or {}).items() if rec.get("crown_jewel") == "yes"]
+        new = [c for c in (gc.get("baseline") or {}).get("first_seen_checks", []) if not c["seen_before"]]
+        if jewels and new:
+            reasons.append(f"crown-jewel asset {jewels[0]} with first-seen behaviour: {new[0]['value']}")
     if bundle.get("risk", 0) > g["max_risk_to_close"]:
         reasons.append(f"high-risk incident: risk {bundle['risk']} > {g['max_risk_to_close']}")
     if g["injection_guard"]:

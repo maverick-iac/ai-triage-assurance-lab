@@ -252,6 +252,9 @@ def triage_metrics(rows: list[dict], by_event, scenarios, incidents, labels=None
                               "exact_match": round(exact / n_map, 3) if n_map else None,
                               "parent_match": round(parent / n_map, 3) if n_map else None,
                               "tactic_match": round(tac / n_map, 3) if n_map else None},
+        "relevance_citation_rate": round(sum(bool(r.get("relevance_cited")) for r in rows) / len(rows), 3),
+        "alternative_hypothesis_rate": round(sum(bool(str(r.get("alternative_hypothesis", "")).strip())
+                                                 for r in rows) / len(rows), 3),
         "latency_mean_s": round(sum(r["seconds"] for r in rows) / len(rows), 2),
         "latency_p95_s": sorted(r["seconds"] for r in rows)[int(0.95 * (len(rows) - 1))],
     }

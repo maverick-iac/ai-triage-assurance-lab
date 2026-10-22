@@ -15,6 +15,7 @@ import csv
 from datetime import datetime, timedelta
 
 from .config import path, settings
+from .context import Baseline, assets_for
 from .correlate import Incident
 from .detections import Alert
 from .log_quality import LogQuality
@@ -30,7 +31,7 @@ def load_user_context() -> dict:
 def build_bundle(inc: Incident, alerts_by_id: dict[str, Alert], events: list[Event],
                  events_by_id: dict[str, Event], lq: LogQuality, users: dict,
                  retriever: Retriever | None, *, mode: str = "evidence",
-                 with_context: bool = True) -> dict:
+                 with_context: bool = True, baseline: Baseline | None = None) -> dict:
     cfg = settings()["pipeline"]
     pad = timedelta(minutes=cfg["context_padding_minutes"])
     start, end = datetime.fromisoformat(inc.start) - pad, datetime.fromisoformat(inc.end) + pad
@@ -52,6 +53,8 @@ def build_bundle(inc: Incident, alerts_by_id: dict[str, Alert], events: list[Eve
                      for c in retriever.search(query, settings()["agent"]["rag_top_k"])]
 
     ctx = users.get(inc.user) if with_context else None
+    gate_ctx = gate_context(inc, alerted, events, baseline)
+    show_relevance = mode == "evidence"
     return {
         "incident_id": inc.id,
         "user": inc.user,
@@ -63,5 +66,14 @@ def build_bundle(inc: Incident, alerts_by_id: dict[str, Alert], events: list[Eve
         "log_health": lq.window_scores(start, end),
         "user_context": {k: v for k, v in ctx.items() if k != "user"} if ctx else None,
         "knowledge": knowledge,
+        "assets": gate_ctx["assets"] if show_relevance else None,
+        "baseline": gate_ctx["baseline"] if show_relevance else None,
+        "gate_context": gate_ctx,          # computed by code for the gates; never shown to the AI
         "mode": mode,
     }
+
+
+def gate_context(inc: Incident, alerted: list[Event], events: list[Event], baseline: Baseline | None) -> dict:
+    baseline = baseline or Baseline(events)
+    return {"assets": assets_for(alerted),
+            "baseline": baseline.for_incident(inc.user, datetime.fromisoformat(inc.start), alerted)}

@@ -75,3 +75,50 @@ def test_resume_skips_finished_incidents(tmp_path, monkeypatch):
     again = run("resume_test", "stub", limit=5, quiet=True, resume=True)
     assert [r["incident_id"] for r in again[:3]] == [r["incident_id"] for r in first]
     assert len(again) == 5
+
+
+# ---------------------------------------------------------------- relevance context + case files
+def test_baseline_flags_first_seen_and_repeats():
+    from triage_lab.context import Baseline
+    def obj(i, days_before, ua):
+        t = T0 - timedelta(days=days_before)
+        return Event(f"B{i}", t.isoformat(), t.isoformat(), "cloud", "object_access", "alice.ng", None, "1.1.1.1",
+                     {"bucket": "finance-reports", "user_agent": ua, "operation": "GetObject"})
+    hist = [obj(1, 3, "Microsoft Excel")]
+    now_excel, now_script = obj(2, 0, "Microsoft Excel"), obj(3, 0, "python-requests/2.31")
+    b = Baseline(hist + [now_excel, now_script]).for_incident("alice.ng", T0, [now_excel, now_script])
+    seen = {c["event_id"]: c["seen_before"] for c in b["first_seen_checks"]}
+    assert seen == {"B2": True, "B3": False}
+
+
+def test_verifier_accepts_baseline_citation(bundle, good_close):
+    from triage_lab.verifier import verify
+    bundle["baseline"] = {"first_seen_checks": [{"value": "finance-reports / Microsoft Excel", "seen_before": True}]}
+    good_close["claims"].append({"type": "observed", "text": "routine for her", "event_ids": ["BASELINE"],
+                                 "quote": "finance-reports / Microsoft Excel"})
+    assert verify(good_close, bundle)["passed"]
+
+
+def test_crown_jewel_first_seen_blocks_close(bundle, good_close):
+    from triage_lab.gates import apply_gates
+    from triage_lab.verifier import verify
+    bundle["gate_context"] = {"assets": {"finance-reports": {"crown_jewel": "yes"}},
+                              "baseline": {"first_seen_checks": [{"value": "finance-reports / python-requests",
+                                                                  "seen_before": False}]}}
+    decision, reasons = apply_gates(good_close, verify(good_close, bundle), bundle)
+    assert decision == "escalate" and any("crown-jewel" in r for r in reasons)
+    bundle["gate_context"]["baseline"]["first_seen_checks"][0]["seen_before"] = True
+    assert apply_gates(good_close, verify(good_close, bundle), bundle)[0] == "close"
+
+
+def test_case_file_renders():
+    from triage_lab.casefile import render
+    row = {"incident_id": "INC-T", "assured": "escalate", "user": "bob.smith", "run": "main", "backend": "stub",
+           "mode": "evidence", "model_decision": "close", "verdict": "false_positive", "model_confidence": 0.8,
+           "gate_reasons": ["privileged identity: never auto-closed"], "summary": "s",
+           "claims_final": [{"type": "observed", "text": "t", "event_ids": ["E1"], "quote": "q"}],
+           "check_final": {"verified_observed": 1, "observed": 1, "observation_ratio": 1.0},
+           "assets_touched": {"WS-BOB": {"type": "workstation", "owner": "bob", "criticality": "low"}},
+           "first_seen": [], "alternative_hypothesis": "h", "not_determinable": ["cloud logs"], "log_health": {}}
+    md = render(row, {"start": "a", "end": "b", "risk": 0.3, "techniques": ["T1530"], "rules": ["DET-005"]})
+    assert "# INC-T: ESCALATE" in md and "privileged identity" in md and "- [ ] cloud logs" in md
