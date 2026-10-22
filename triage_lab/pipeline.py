@@ -122,7 +122,7 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
     v, c, used_retry = v0, c0, False
     if v0 and c0 and not c0["passed"] and retries:
         history = [{"role": "assistant", "content": raw0},
-                   {"role": "user", "content": retry_prompt(c0["failures"])}]
+                   {"role": "user", "content": retry_prompt(c0["failures"], bundle, v0)}]
         v1, _, s1 = agent.triage(bundle, history)
         secs += s1
         used_retry = True
