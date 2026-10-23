@@ -79,14 +79,18 @@ def find_state():
     # pick the state with the most saved model answers
     return max(states, key=lambda s: len(list((s / "results" / "cache").glob("*.json")))) if states else None
 
+states = [Path(p) for p in glob.glob(f"{INPUT_ROOT}/**/state", recursive=True) if Path(p, "results").exists()]
 state = find_state()
 if state:
-    for sub in ("results", "data", "rules/drafts", "results_heldout", "data_heldout"):
-        if (state / sub).exists():
-            shutil.copytree(state / sub, PROJECT / sub, dirs_exist_ok=True)
+    # merge EVERY attached state (e.g. the main run's output AND the ablations output), the
+    # richest last, so runs from all of them are kept and nothing has to be re-asked
+    for st in sorted(states, key=lambda s: len(list((s / "results" / "cache").glob("*.json")))):
+        for sub in ("results", "data", "rules/drafts", "results_heldout", "data_heldout"):
+            if (st / sub).exists():
+                shutil.copytree(st / sub, PROJECT / sub, dirs_exist_ok=True)
     n = len(list((PROJECT / "results" / "cache").glob("*.json")))
     runs = sorted(p.stem for p in (PROJECT / "results" / "runs").glob("*.jsonl"))
-    print(f"restored from {state}: {n} saved model answers, runs: {runs}")
+    print(f"restored from {len(states)} attached output(s): {n} saved model answers, runs: {runs}")
 else:
     print("no previous state attached: starting fresh")
 """),
