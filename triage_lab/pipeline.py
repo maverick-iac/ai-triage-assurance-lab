@@ -82,10 +82,14 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
         for line in f.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 r = json.loads(line)
+                if model_error(r):                   # timeout / Ollama down: try this incident again
+                    continue
                 done[r.get("incident_key", r["incident_id"])] = r
     todo = incidents[:limit] if limit else incidents
     if not quiet and done:
         print(f"resuming '{name}': {len(done)} incidents already done")
+    by_id = {i.id: f"{i.user}|{i.start}" for i in incidents}       # rows saved before keys were stored
+    done = {(by_id.get(k, k) if "|" not in k else k): r for k, r in done.items()}
 
     with open(f, "a" if resume else "w", encoding="utf-8") as fh:
         for n, inc in enumerate(todo, 1):
@@ -95,9 +99,9 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
                 continue
             row = _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
                               alerts_by_id, lq, users, bundle_retriever, name, baseline, framing)
+            row["incident_key"] = key
             fh.write(json.dumps(row) + "\n")
             fh.flush()
-            row["incident_key"] = key
             done[key] = row
             if not quiet:
                 extra = f" critic={row['critic_only']:<8}" if critic else ""
@@ -105,11 +109,20 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
                 print(f"[{n}/{len(todo)}] {inc.id} {inc.user:<11} baseline={row['baseline']:<8} "
                       f"assured={row['assured']:<8}{extra}{tools} {'; '.join(row['gate_reasons'])[:60]}")
 
+    errors = sum(model_error(r) for r in done.values())
+    if errors and not quiet:
+        print(f"WARNING: {errors} incidents in '{name}' got no model answer (timeout or Ollama down). "
+              f"Run the same stage again with this output attached to retry just those.")
     order = {i.id: k for k, i in enumerate(incidents)}
     rows = sorted(done.values(), key=lambda r: order.get(r["incident_id"], 1e9))
     with open(f, "w", encoding="utf-8") as fh:          # tidy final file, in incident order
         fh.writelines(json.dumps(r) + "\n" for r in rows)
     return rows
+
+
+def model_error(row: dict) -> bool:
+    """The model never answered (timeout, server down): not a decision, so a resume retries it."""
+    return (not row.get("schema_valid")) and str(row.get("summary", "")).startswith("MODEL ERROR")
 
 
 def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,

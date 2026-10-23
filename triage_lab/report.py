@@ -66,6 +66,7 @@ def render(m: dict) -> str:
               + (" · with critic" if t.get("with_critic") else ""),
               _table(["Metric", "Value"], [
                   ["Schema validity", mo["schema_validity"]],
+                  ["Model errors (no answer: timeout or server down)", mo.get("model_errors", 0)],
                   ["Faithfulness (verified observed claims)", mo["faithfulness_mean"]],
                   ["Observation ratio (mean)", mo["observation_ratio_mean"]],
                   ["Hallucinated event IDs", mo["hallucinated_event_ids"]],

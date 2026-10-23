@@ -243,6 +243,8 @@ def triage_metrics(rows: list[dict], by_event, scenarios, incidents, labels=None
         tac += bool({tactic.get(t) for t in mt} & {tactic.get(t) for t in tt} - {None})
     out["model"] = {
         "schema_validity": round(sum(r["schema_valid"] for r in rows) / len(rows), 3),
+        "model_errors": sum((not r["schema_valid"]) and str(r.get("summary", "")).startswith("MODEL ERROR")
+                            for r in rows),
         "faithfulness_mean": round(sum(faith) / len(faith), 3) if faith else None,
         "hallucinated_event_ids": sum(c["hallucinated_ids"] for c in checks),
         "hallucination_rate_per_claim": round(sum(c["hallucinated_ids"] for c in checks) / claims, 3) if claims else 0,

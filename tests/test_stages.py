@@ -77,3 +77,10 @@ def test_confusion_counts_false_close_as_false_negative():
     c = confusion([(True, "close"), (True, "escalate"), (False, "close"), (False, "escalate")])
     assert (c["tp"], c["fn"], c["fp"], c["tn"]) == (1, 1, 1, 1)
     assert c["false_close_rate"] == 0.5
+
+
+def test_resume_retries_incidents_the_model_never_answered():
+    from triage_lab.pipeline import model_error
+    assert model_error({"schema_valid": False, "summary": "MODEL ERROR: timed out"})
+    assert not model_error({"schema_valid": False, "summary": "the model wrote prose, not JSON"})
+    assert not model_error({"schema_valid": True, "summary": "ok"})
