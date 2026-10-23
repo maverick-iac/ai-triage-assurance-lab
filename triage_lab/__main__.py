@@ -3,8 +3,9 @@
   generate                 build the labelled dataset (stage 1)
   run                      one experiment: stages 2-6 for every incident
   stage <name>             a named batch of runs (what the Kaggle notebook uses), always resumable:
-                             main | ablations | agentic | bigger_model | repeat | gaploop | score | all
-  ablations                payload-only, no-context, no-RAG and poisoned-RAG runs
+                             main | ablations | agentic | bigger_model | heldout | repeat | gaploop | score | all
+  ablations                payload-only, no-context, no-RAG, poisoned-RAG, fp-framing, no-playbook runs
+  grade                    investigation accuracy only (also part of score); --judge ollama for an LLM judge
   repeat                   k repeated runs for the consistency metric (pass^k)
   score                    stage 7: metrics.json + REPORT.md + Navigator layer
   demo                     the demo script
@@ -14,6 +15,7 @@
   all                      generate + every run + gaploop + score + demo
 
 Common options: --backend stub|ollama|replay   --model qwen2.5:7b   --resume
+                --dataset main|heldout   (heldout: a second dataset from another seed, never tuned on)
 """
 
 from __future__ import annotations
@@ -33,10 +35,12 @@ RUNS = {
     "main_critic": {"critic": True},
     "agentic": {"mode": "agentic"},
     "agentic_critic": {"mode": "agentic", "critic": True},
+    "fp_framing": {"framing": True},                  # a colleague asks "is this a false positive?"
+    "no_playbook": {"rag": False, "playbook": False},  # no knowledge notes, no DECIDING checklist
 }
 STAGES = {
     "main": ["main"],
-    "ablations": ["payload_only", "no_context", "no_rag", "poisoned_rag"],
+    "ablations": ["payload_only", "no_context", "no_rag", "poisoned_rag", "fp_framing", "no_playbook"],
     "agentic": ["agentic", "agentic_critic", "main_critic"],
     "bigger_model": ["main", "agentic"],
 }
@@ -51,11 +55,13 @@ def main(argv: list[str] | None = None) -> None:
     common.add_argument("--backend", choices=["stub", "ollama", "replay"])
     common.add_argument("--model", help="override agent.model, e.g. qwen2.5:7b")
     common.add_argument("--resume", action="store_true", help="skip incidents already finished in a run")
+    common.add_argument("--dataset", choices=["main", "heldout"], default="main",
+                        help="heldout = data_heldout/ + results_heldout/, generated with another seed")
 
     p = argparse.ArgumentParser(prog="triage_lab", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("generate")
+    sub.add_parser("generate", parents=[common])
 
     r = sub.add_parser("run", parents=[common])
     r.add_argument("--name", default="main")
@@ -67,7 +73,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--limit", type=int, help="only the first N incidents (quick test)")
 
     st = sub.add_parser("stage", parents=[common])
-    st.add_argument("name", choices=list(STAGES) + ["repeat", "gaploop", "score", "all"])
+    st.add_argument("name", choices=list(STAGES) + ["heldout", "repeat", "gaploop", "score", "all"])
     st.add_argument("-k", type=int, default=3, help="repeats for the repeat stage")
     st.add_argument("--limit", type=int)
 
@@ -76,7 +82,9 @@ def main(argv: list[str] | None = None) -> None:
     k = sub.add_parser("repeat", parents=[common])
     k.add_argument("-k", type=int, default=3)
     k.add_argument("--temperature", type=float, default=0.7)
-    sub.add_parser("score")
+    sub.add_parser("score", parents=[common])
+    gr = sub.add_parser("grade", parents=[common])
+    gr.add_argument("--judge", choices=["stub", "ollama"], help="LLM judge for misattribution (default: rules)")
     d = sub.add_parser("demo")
     d.add_argument("--run", default="main")
     sub.add_parser("gaploop", parents=[common])
@@ -90,6 +98,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("all", parents=[common])
 
     args = p.parse_args(argv)
+    if getattr(args, "dataset", "main") == "heldout" or (args.cmd == "stage" and args.name == "heldout"):
+        use_heldout()
     if getattr(args, "model", None):
         from .config import override
         override("agent.model", args.model)
@@ -116,6 +126,8 @@ def main(argv: list[str] | None = None) -> None:
             print(json.dumps(r, default=str))
     if args.cmd in ("score", "all", "repeat"):
         _score()
+    if args.cmd == "grade":
+        _grade(args.judge)
     if args.cmd in ("demo", "all"):
         from .demo import main as demo
         print(demo(getattr(args, "run", "main")))
@@ -126,6 +138,32 @@ def main(argv: list[str] | None = None) -> None:
 
         from .ingest.windows import ingest
         print(ingest(Path(args.events), Path(args.labels), args.shift_to, args.as_user))
+
+
+def use_heldout() -> None:
+    """Point every stage at a second, independently generated dataset (another seed), so a
+    prompt or threshold tuned on the main dataset can be checked on scenarios it never saw."""
+    from .config import override, settings
+    override("paths.data_dir", "data_heldout")
+    override("paths.results_dir", "results_heldout")
+    override("generator.seed", settings()["generator"].get("heldout_seed", 11))
+
+
+def _grade(judge_backend) -> None:
+    from .config import path
+    from .grading import Judge, grade_run
+    from .metrics import load_pipeline, load_truth
+    from .schema import read_jsonl
+    labels, by_event, scenarios = load_truth()
+    _, incidents, _, _ = load_pipeline()
+    judge = Judge(judge_backend)
+    for f in sorted((path("results_dir") / "runs").glob("*.jsonl")):
+        if f.stem.startswith("repeat_"):
+            continue
+        g = grade_run(f.stem + ("" if judge.label == "deterministic" else "__judged"), list(read_jsonl(f)),
+                      incidents, by_event, scenarios, labels, judge)
+        print(f"{f.stem:<24} investigation score {g['investigation_score_mean']} (hard fails {g['hard_fails']}/"
+              f"{g['incidents']}) misattribution rate {g['misattribution']['rate']} grader {g['grader']}")
 
 
 def _runs(names: list[str], backend, resume: bool, suffix: str = "", limit: int | None = None) -> None:
@@ -150,6 +188,8 @@ def _stage(args, backend) -> None:
     if args.name in STAGES:
         suffix = f"__{_tag(settings()['agent']['model'])}" if args.name == "bigger_model" else ""
         _runs(STAGES[args.name], backend, resume=True, suffix=suffix, limit=args.limit)
+    elif args.name == "heldout":                      # data_dir already points at data_heldout/
+        _runs(["main"], backend, resume=True, limit=args.limit)
     elif args.name == "repeat":
         _repeat(backend, args.k, 0.7, resume=True)
     elif args.name == "gaploop":
@@ -178,7 +218,7 @@ def _score() -> None:
     export(m)
     write(m)
     _cases(names, quiet=True)
-    print(f"Wrote results/metrics.json, results/REPORT.md, results/navigator_layer.json "
+    print(f"Wrote {path('results_dir').name}/metrics.json, REPORT.md, navigator_layer.json "
           f"({len(names)} runs scored{', ' + str(len(repeats)) + ' repeats' if repeats else ''})")
 
 

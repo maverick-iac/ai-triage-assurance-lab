@@ -58,10 +58,12 @@ dies: commit the same stage again and finished incidents are skipped.
 | Order | STAGE | MODEL | Runs |
 |---|---|---|---|
 | 1 | `main` | `qwen2.5:7b` | main |
-| 2 | `ablations` | `qwen2.5:7b` | payload_only, no_context, no_rag, poisoned_rag |
+| 1b | `main` again | `qwen2.5:7b` | only if you ran `main` before this update: triages just the 4 new decoy incidents (a few minutes) |
+| 2 | `ablations` | `qwen2.5:7b` | payload_only, no_context, no_rag, poisoned_rag, fp_framing, no_playbook |
 | 3 | `agentic` | `qwen2.5:7b` | agentic, agentic_critic, main_critic |
 | 4 | `gaploop` | `qwen2.5:7b` | AI drafts, backtests and revises rules |
 | 5 | `bigger_model` | `qwen2.5:14b` | main + agentic with the bigger model (names end in `__qwen2.5-14b`) |
+| 5b | `heldout` | `qwen2.5:7b` | main on a second dataset (another seed): your overfitting check. Output: `results_heldout_...` |
 | 6 | `repeat` | `qwen2.5:7b` | 3 repeats for pass^k (optional) |
 
 You can combine stages in one session if the time allows; just run them one after another

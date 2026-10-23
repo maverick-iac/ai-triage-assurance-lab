@@ -24,9 +24,10 @@ then saves the whole project state to this version's **Output**.
 |---|---|---|
 | `test` | 5 incidents, to check everything works (run this interactively first) | 5 min |
 | `main` | the main experiment | 20-40 min |
-| `ablations` | payload-only, no-context, no-RAG, poisoned-RAG | 1.5-2.5 h |
+| `ablations` | payload-only, no-context, no-RAG, poisoned-RAG, fp-framing, no-playbook | 2.5-4 h |
 | `agentic` | agentic investigation, agentic + critic, critic on code bundle | 1-2 h |
 | `bigger_model` | main + agentic with `MODEL` (set it to e.g. `qwen2.5:14b`) | 2-3 h |
+| `heldout` | main run on a second dataset (another seed) you never tuned on | 30-50 min |
 | `repeat` | 3 repeats of main for pass^k | 1-2 h |
 | `gaploop` | AI drafts, backtests and revises detection rules | 10-20 min |
 | `score` | metrics + report from everything so far (no GPU needed) | 1 min |
@@ -34,7 +35,7 @@ then saves the whole project state to this version's **Output**.
 Runs are resumable: if a session dies, commit the same stage again with the last output attached;
 finished incidents are skipped and saved model answers are reused."""),
     ("code", """# ---- settings: change these each session --------------------------------
-STAGE = "test"            # test | main | ablations | agentic | bigger_model | repeat | gaploop | score
+STAGE = "test"            # test | main | ablations | agentic | bigger_model | heldout | repeat | gaploop | score
 MODEL = "qwen2.5:7b"      # keep ONE model for all reported runs; bigger_model uses a bigger one
 GITHUB_URL = ""           # e.g. "https://github.com/<you>/ai-triage-assurance-lab.git" (leave "" to use the dataset)
 BACKEND = "ollama"        # "stub" only for a dry run without a model
@@ -50,8 +51,8 @@ import glob, os, shutil, subprocess, sys, time, json
 from pathlib import Path
 
 if not GITHUB_URL and glob.glob(f"{INPUT_ROOT}/**/triage_lab/__init__.py", recursive=True):
-    assert glob.glob(f"{INPUT_ROOT}/**/triage_lab/agentic.py", recursive=True), (
-        "The attached dataset holds an OLD version of the project (no agentic mode). "
+    assert glob.glob(f"{INPUT_ROOT}/**/triage_lab/grading.py", recursive=True), (
+        "The attached dataset holds an OLD version of the project (no investigation grading). "
         "Upload the latest zip as a New Version of the dataset, then update the input.")
 
 PROJECT = Path(TEMP) / "ai-triage-assurance-lab"     # code lives outside the saved Output
@@ -80,7 +81,7 @@ def find_state():
 
 state = find_state()
 if state:
-    for sub in ("results", "data", "rules/drafts"):
+    for sub in ("results", "data", "rules/drafts", "results_heldout", "data_heldout"):
         if (state / sub).exists():
             shutil.copytree(state / sub, PROJECT / sub, dirs_exist_ok=True)
     n = len(list((PROJECT / "results" / "cache").glob("*.json")))
@@ -115,10 +116,11 @@ if BACKEND == "ollama" and STAGE != "score":
 def save_state():
     (PROJECT / "results").mkdir(exist_ok=True)
     out = Path(WORK) / "state"
-    for sub in ("results", "data", "rules/drafts"):
+    for sub in ("results", "data", "rules/drafts", "results_heldout", "data_heldout"):
         if (PROJECT / sub).exists():
             shutil.copytree(PROJECT / sub, out / sub, dirs_exist_ok=True)
-    shutil.make_archive(f"{WORK}/results_{STAGE}", "zip", PROJECT, "results")
+    shutil.make_archive(f"{WORK}/results_{STAGE}", "zip", PROJECT,
+                        "results_heldout" if STAGE == "heldout" else "results")
     print(f"saved state to {out} and {WORK}/results_{STAGE}.zip")
 
 model_args = ["--model", MODEL, "--backend", BACKEND]
@@ -129,7 +131,9 @@ else:
 print("$ python -m triage_lab", " ".join(cmd))
 t0 = time.time()
 try:
-    if not Path("data/events.jsonl").exists():
+    # (re)generate when missing, or when restored data predates the decoy day; the original ten days
+    # come out byte-identical, so finished runs and saved answers stay valid
+    if not Path("data/events.jsonl").exists() or not Path("data/events_decoy.jsonl").exists():
         subprocess.run([sys.executable, "-m", "triage_lab", "generate"], check=True)
     # live emulation: add live/sysmon.jsonl + live/labels.csv to the dataset; ingested once
     live_ev, live_lab = Path("live/sysmon.jsonl"), Path("live/labels.csv")
@@ -151,8 +155,10 @@ if STAGE == "test":
               "| AI alone:", r["baseline"], "| with controls:", r["assured"])
         print("   ", r["summary"][:160])
 else:
-    rep = Path("results/REPORT.md").read_text()
+    rep = Path("results_heldout/REPORT.md" if STAGE == "heldout" else "results/REPORT.md").read_text()
     print(rep[rep.find("## 5."): rep.find("### Run")])
+    if "## 6. Investigation" in rep:
+        print(rep[rep.find("## 6. Investigation"): rep.find("Gate pass rates")])
 """),
 ]
 

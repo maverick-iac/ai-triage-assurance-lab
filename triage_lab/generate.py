@@ -19,7 +19,7 @@ import json
 import random
 from datetime import datetime, timedelta
 
-from .config import path, settings
+from .config import ROOT, path, settings
 from .schema import Event
 
 ATTACKER_IP = "198.51.100.{}"
@@ -238,8 +238,46 @@ def corrupt(b: Builder, rate: float) -> list[str]:
     return lines
 
 
+def decoy_day(users: list[dict], start: datetime, cfg: dict) -> tuple[list[Event], list[dict], list[dict]]:
+    """An extra day after the main timeline with attacks that overlap LEGITIMATE activity by
+    the same user (benign-but-suspicious decoys). Tests the failure mode of merging everything
+    into one attack narrative. Built with its own random stream and 'D' event IDs, so the main
+    ten days (and every answer already cached for them) stay exactly the same."""
+    rng = random.Random(cfg["seed"] + 1000)
+    b = Builder(rng)
+    day0 = start + timedelta(days=cfg["days"])
+    background(b, users, day0, 1, cfg["background_per_hour"])
+    humans = [u["user"] for u in users if u["privileged"] == "no"]
+    scenarios = []
+    for i in range(cfg.get("decoy_scenarios", 4)):
+        sid, t0 = f"S{901 + i}", day0 + timedelta(hours=1 + 4 * i)
+        user = rng.choice(humans)
+        attack(b, sid, "full", user, t0)
+        # legitimate activity by the SAME user inside the attack window
+        url = f"https://news.vendor-weekly.com/issue/{rng.randint(100, 999)}"
+        b.add(t0 + timedelta(minutes=12), "email", "email_link_click", user, scenario=sid, malicious=False,
+              url=url, sender="newsletter@vendor-weekly.com", sender_internal=False,
+              subject="This week in cloud security", domain_age_days=rng.randint(2000, 5000))
+        b.labels[-1]["decoy"] = True
+        b.add(t0 + timedelta(minutes=22), "cloud", "object_access", user, ip=OFFICE_IP.format(rng.randint(2, 60)),
+              scenario=sid, malicious=False, bucket="team-shared", operation="GetObject",
+              object_count=rng.randint(2, 6), user_agent="Microsoft Excel")
+        b.labels[-1]["decoy"] = True
+        scenarios.append({"scenario_id": sid, "kind": "attack", "variant": "with_decoy", "user": user,
+                          "start": t0.isoformat(), "tags": ["with_decoy"]})
+    order = sorted(range(len(b.events)), key=lambda i: b.events[i].ts)
+    events, labels = [b.events[i] for i in order], [b.labels[i] for i in order]
+    for n, ev in enumerate(events, 1):
+        ev.id = f"D{n:06d}"
+    return events, labels, scenarios
+
+
 def main() -> None:
     cfg = settings()["generator"]
+    out = path("data_dir")
+    for f in ("users.csv", "assets.csv"):           # a held-out dataset folder needs the same directory
+        if not (out / f).exists():
+            (out / f).write_text((ROOT / "data" / f).read_text(encoding="utf-8"), encoding="utf-8")
     rng = random.Random(cfg["seed"])
     users = load_users()
     humans = [u["user"] for u in users if u["user"] != "svc-backup"]
@@ -284,9 +322,16 @@ def main() -> None:
 
     out = path("data_dir")
     lines = corrupt(b, cfg["malformed_rate"])
+    d_events, d_labels, d_scen = decoy_day(users, start, cfg)
+    scenarios += d_scen
     (out / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    decoy_file = out / "events_decoy.jsonl"         # its own ingest batch: the main file stays unchanged
+    if d_events:
+        decoy_file.write_text("".join(json.dumps(e.__dict__) + "\n" for e in d_events), encoding="utf-8")
+    elif decoy_file.exists():
+        decoy_file.unlink()
     with open(out / "labels.jsonl", "w", encoding="utf-8") as fh:
-        for ev, lab in zip(b.events, b.labels):
+        for ev, lab in zip(b.events + d_events, b.labels + d_labels):
             row = {k: v for k, v in lab.items() if k != "_ev"}
             fh.write(json.dumps({"event_id": ev.id, "source": ev.source, "ts": ev.ts, **row}) + "\n")
         for lab in b.dropped:

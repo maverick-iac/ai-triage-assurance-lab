@@ -16,6 +16,7 @@ gantt
     ablations                                           :b2, 2026-10-23, 1d
     agentic + gaploop                                   :b3, 2026-10-24, 1d
     bigger_model (14B)                                  :b4, 2026-10-25, 1d
+    heldout                                             :b6, 2026-10-26, 1d
     repeat (optional)                                   :b5, 2026-10-26, 1d
     section Laptop
     Read results, fix prompt if needed                  :c1, 2026-10-23, 1d
@@ -33,7 +34,7 @@ gantt
 | **Fri 23** | Download results; read 10 answers by eye; `score` on laptop | Commit `ablations` | `main` scored with real numbers |
 | **Sat 24** | Score; draft the results section | Commit `agentic`, then `gaploop` if time remains | Ablations scored |
 | **Sun 25** | Live emulation in the VM (2-3 Atomic Red Team tests), ingest; re-upload the updated `data` folder with the dataset, or run `ingest-windows` in the notebook | Commit `bigger_model` with `MODEL = "qwen2.5:14b"` | Agentic and critic results scored |
-| **Mon 26** | Final `score`; Navigator layer + screenshot; README results; slides | `repeat` (optional) | **Results freeze** |
+| **Mon 26** | Final `score`; Navigator layer + screenshot; README results; slides | `heldout`, then `repeat` (optional) | **Results freeze** |
 | **Tue 27** | Rehearse `demo` twice on the laptop (replays saved results); record backup video; push to GitHub | — | Demo runs in under a minute offline |
 | **Wed 28** | Morning check, then **demo** | — | Done |
 
@@ -43,7 +44,8 @@ Cut in this order:
 
 1. `repeat` (pass^k): future work.
 2. `bigger_model`: future work, or run `main` only with 14B.
+2b. `heldout`: keep it if you can; it answers "did you just tune the prompt to your own data?"
 3. Live emulation: one technique, or future work.
-4. Two ablations: keep `payload_only` and `no_context`.
+4. Ablations: keep `payload_only`, `no_context` and `fp_framing` (`--only` picks runs).
 
 **Never cut:** `main`, `agentic` (it's your differentiator now), scoring, the rehearsal and the backup video.

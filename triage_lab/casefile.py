@@ -19,7 +19,7 @@ def _md_escape(s) -> str:
     return str(s).replace("|", "\\|").replace("\n", " ")
 
 
-def render(r: dict, inc: dict, truth: dict | None = None) -> str:
+def render(r: dict, inc: dict, truth: dict | None = None, grade: dict | None = None) -> str:
     decision = r["assured"].upper()
     lines = [f"# {r['incident_id']}: {decision}",
              "",
@@ -85,6 +85,15 @@ def render(r: dict, inc: dict, truth: dict | None = None) -> str:
     if truth:
         lines += ["", "---", f"_Lab answer key (not visible to an analyst): "
                              f"{'MALICIOUS' if truth['malicious'] else 'benign'}, scenario {truth['variant']}._"]
+    if grade:
+        verdict = "HARD FAIL (wrong disposition)" if grade["hard_fail"] else f"{grade['score']}/100"
+        lines += [f"_Investigation score: {verdict}. Gates: "
+                  + "; ".join(f"{'✓' if g['passed'] else '✗'} {g['gate']} ({g['weight']})" for g in grade["gates"])
+                  + "._"]
+        if grade["misattributions"]:
+            lines.append("_Misattributed (legitimate activity presented as the attack): "
+                         + ", ".join(m["event_id"] + (" (decoy)" if m["decoy"] else "") for m in grade["misattributions"])
+                         + "._")
     return "\n".join(lines) + "\n"
 
 
@@ -92,11 +101,14 @@ def write_cases(run_name: str) -> int:
     rows = list(read_jsonl(path("results_dir") / "runs" / f"{run_name}.jsonl"))
     incs = {i["id"]: i for i in read_jsonl(path("results_dir") / "pipeline" / "incidents.jsonl")}
     _, by_event, scenarios = load_truth()
+    from .grading import load_grades
+    grades = load_grades(run_name)
     out = path("results_dir") / "cases" / run_name
     out.mkdir(parents=True, exist_ok=True)
     for r in rows:
         inc = incs.get(r["incident_id"])
         if inc:
             truth = incident_truth(inc, by_event, scenarios)
-            (out / f"{r['incident_id']}.md").write_text(render(r, inc, truth), encoding="utf-8")
+            (out / f"{r['incident_id']}.md").write_text(render(r, inc, truth, grades.get(r["incident_id"])),
+                                                       encoding="utf-8")
     return len(rows)

@@ -59,21 +59,34 @@ def read_jsonl(path: Path) -> Iterator[dict]:
 
 
 def load_events(path: Path) -> tuple[list[Event], dict]:
-    """Parse events, counting broken lines per source for the log-quality stage."""
-    events, stats = [], {"lines": 0, "parse_errors": 0, "errors_by_source": {}}
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            stats["lines"] += 1
-            try:
-                d = json.loads(line)
-                events.append(Event(**d))
-            except (json.JSONDecodeError, TypeError):
-                stats["parse_errors"] += 1
-                src = _guess_source(line)
-                stats["errors_by_source"][src] = stats["errors_by_source"].get(src, 0) + 1
+    """Parse events, counting broken lines per source for the log-quality stage.
+
+    Extra ingest batches sit beside the main file as events_<name>.jsonl (for example
+    events_decoy.jsonl) and are loaded too. Parse success is scored per batch, like a
+    separate log feed, so adding a batch never changes the health scores of the others."""
+    events, stats = [], {"lines": 0, "parse_errors": 0, "errors_by_source": {}, "batches": {}}
+    files = [path] + sorted(p for p in path.parent.glob("events_*.jsonl"))
+    for f in files if path.exists() else []:
+        batch = {"errors_by_source": {}, "lines_by_source": {}, "first_ts": None, "last_ts": None}
+        with open(f, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                stats["lines"] += 1
+                try:
+                    ev = Event(**json.loads(line))
+                except (json.JSONDecodeError, TypeError):
+                    stats["parse_errors"] += 1
+                    src = _guess_source(line)
+                    stats["errors_by_source"][src] = stats["errors_by_source"].get(src, 0) + 1
+                    batch["errors_by_source"][src] = batch["errors_by_source"].get(src, 0) + 1
+                    continue
+                events.append(ev)
+                batch["lines_by_source"][ev.source] = batch["lines_by_source"].get(ev.source, 0) + 1
+                batch["first_ts"] = min(batch["first_ts"] or ev.ts, ev.ts)
+                batch["last_ts"] = max(batch["last_ts"] or ev.ts, ev.ts)
+        stats["batches"][f.stem] = batch
     events.sort(key=lambda e: e.ts)
     return events, stats
 

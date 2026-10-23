@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from .agent import Agent, retry_prompt
+from .agent import FP_FRAMING_NOTE, Agent, retry_prompt
 from .agentic import investigate
 from .context import Baseline
 from .config import path, settings
@@ -54,13 +54,15 @@ def detection_stage():
 
 def run(name: str = "main", backend: str | None = None, mode: str = "evidence", context: bool = True,
         rag: bool = True, poison: bool = False, temperature: float | None = None, run_index: int = 0,
-        limit: int | None = None, quiet: bool = False, critic: bool = False, resume: bool = False) -> list[dict]:
+        limit: int | None = None, quiet: bool = False, critic: bool = False, resume: bool = False,
+        playbook: bool = True, framing: bool = False) -> list[dict]:
     events, lq, alerts, incidents = detection_stage()
     events_by_id = {e.id: e for e in events}
     alerts_by_id = {a.id: a for a in alerts}
     users = load_user_context()
     retriever = Retriever(poison=poison) if rag else None
     agent = Agent(backend, temperature, run_index)
+    agent.playbook = playbook
     retries = settings()["gates"]["verifier_retries"]
     baseline = Baseline(events)
 
@@ -84,7 +86,7 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
                 done[key]["incident_id"] = inc.id
                 continue
             row = _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
-                              alerts_by_id, lq, users, retriever, name, baseline)
+                              alerts_by_id, lq, users, retriever, name, baseline, framing)
             fh.write(json.dumps(row) + "\n")
             fh.flush()
             row["incident_key"] = key
@@ -103,10 +105,13 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
 
 
 def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
-                alerts_by_id, lq, users, retriever, name, baseline=None) -> dict:
+                alerts_by_id, lq, users, retriever, name, baseline=None, framing=False) -> dict:
     def code_bundle(m="evidence"):
-        return build_bundle(inc, alerts_by_id, events, events_by_id, lq, users, retriever,
-                            mode=m, with_context=context, baseline=baseline)
+        b = build_bundle(inc, alerts_by_id, events, events_by_id, lq, users, retriever,
+                         mode=m, with_context=context, baseline=baseline)
+        if framing:                                  # biased question from a colleague
+            b["analyst_note"] = FP_FRAMING_NOTE
+        return b
 
     trajectory, invalid_calls, fallback, off_target = [], 0, False, 0
     if mode == "agentic":
@@ -149,6 +154,7 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
     return {
         "run": name, "incident_id": inc.id, "user": inc.user, "backend": agent.label,
         "mode": mode, "context": context, "rag": rag, "poison": poison, "critic": critic,
+        "playbook": agent.playbook, "framing": framing,
         "techniques_detected": inc.techniques, "risk": inc.risk,
         "schema_valid": v0 is not None, "model_decision": baseline,
         "model_confidence": v0["confidence"] if v0 else None,

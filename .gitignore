@@ -12,3 +12,9 @@ results/DEMO_*.txt
 # keep model answers out of git by default; commit them if you want others to replay your demo
 results/cache/
 live/
+data/events_*.jsonl
+results/grades/
+results/cases/
+# held-out dataset (python -m triage_lab stage heldout)
+data_heldout/
+results_heldout/

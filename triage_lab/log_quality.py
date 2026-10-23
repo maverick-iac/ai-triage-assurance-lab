@@ -52,13 +52,33 @@ class LogQuality:
             total = per_source_lines[s] + errs
             self.parse_rate[s] = 1 - errs / total if total else 0.0
         self.lag_p95 = {s: _p95(lags[s]) for s in self.sources}
+        # parse success per ingest batch (each extra events_<name>.jsonl is its own feed)
+        self.batches = []
+        for name, bt in parse_stats.get("batches", {}).items():
+            if not bt.get("first_ts"):
+                continue
+            rate = {}
+            for s in self.sources:
+                errs = bt["errors_by_source"].get(s, 0)
+                total = bt["lines_by_source"].get(s, 0) + errs
+                rate[s] = 1 - errs / total if total else 0.0
+            self.batches.append((_bucket(datetime.fromisoformat(bt["first_ts"]), self.minutes),
+                                 datetime.fromisoformat(bt["last_ts"]), rate))
+
+    def _parse(self, source: str, b: datetime) -> float:
+        if len(self.batches) > 1:
+            for lo, hi, rate in self.batches[1:]:      # extra batches cover their own time range
+                if lo <= b <= hi:
+                    return rate[source]
+            return self.batches[0][2][source]
+        return self.parse_rate.get(source, 0.0)
 
     def bucket_score(self, source: str, b: datetime) -> dict:
         n = self.counts[source].get(b, 0)
         med = self.median.get(source) or 1
         volume = min(1.0, n / med)
         completeness = self.complete[source].get(b, 0) / n if n else 0.0
-        parse = self.parse_rate.get(source, 0.0)
+        parse = self._parse(source, b)
         w = self.weights
         score = w["volume"] * volume + w["completeness"] * completeness + w["parse"] * parse
         return {"source": source, "bucket": b.isoformat(), "events": n, "volume": round(volume, 3),

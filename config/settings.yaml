@@ -10,12 +10,14 @@ paths:
 
 generator:
   seed: 7
+  heldout_seed: 11            # --dataset heldout: a second dataset, never used for tuning
   start: "2026-10-01T00:00:00+00:00"
   days: 10                    # 120 two-hour slots; each scenario gets its own slot
   attack_scenarios: 40        # labelled malicious chains
   benign_scenarios: 60        # lookalike benign activity
   background_per_hour: 10     # normal events per source per hour
   malformed_rate: 0.004       # share of broken log lines (tests parsing)
+  decoy_scenarios: 4          # extra day: attacks overlapping the same user's legitimate activity
 
 pipeline:
   sources: [email, identity, endpoint, cloud]

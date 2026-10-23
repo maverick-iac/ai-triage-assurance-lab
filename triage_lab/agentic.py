@@ -27,7 +27,7 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from .agent import SYSTEM_PROMPT, Agent, parse_json, stub_verdict
+from .agent import Agent, parse_json, stub_verdict, system_prompt
 from .config import settings
 from .correlate import Incident
 from .detections import Alert
@@ -35,7 +35,7 @@ from .log_quality import LogQuality
 from .rag import Retriever
 from .schema import Event
 
-AGENT_RULES = SYSTEM_PROMPT + """
+INVESTIGATION_RULES = """
 
 INVESTIGATION
 You start with only the alerts and the events that fired them. Use the tools to gather the evidence an
@@ -200,7 +200,8 @@ def investigate(agent: Agent, inc: Incident, alerts_by_id: dict[str, Alert], eve
                + json.dumps([{"rule": a.rule_id, "title": a.title, "level": a.level, "techniques": a.techniques,
                               "event_ids": a.event_ids} for a in alerts], indent=1)
                + "\n</alerts>\n<events>\n" + "\n".join(json.dumps(e) for e in alerted) + "\n</events>")
-    messages = [{"role": "system", "content": AGENT_RULES.replace("{max_calls}", str(max_calls))},
+    rules = system_prompt(agent.playbook) + INVESTIGATION_RULES
+    messages = [{"role": "system", "content": rules.replace("{max_calls}", str(max_calls))},
                 {"role": "user", "content": opening}]
     trajectory, invalid, raw, verdict, t0 = [], 0, "", None, time.time()
 
