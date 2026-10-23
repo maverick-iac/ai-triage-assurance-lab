@@ -18,3 +18,7 @@ results/cases/
 # held-out dataset (python -m triage_lab stage heldout)
 data_heldout/
 results_heldout/
+data_small/
+data_small_heldout/
+results_small/
+results_small_heldout/

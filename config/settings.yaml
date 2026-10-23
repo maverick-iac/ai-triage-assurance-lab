@@ -19,6 +19,15 @@ generator:
   malformed_rate: 0.004       # share of broken log lines (tests parsing)
   decoy_scenarios: 4          # extra day: attacks overlapping the same user's legitimate activity
 
+# --dataset small: a laptop-sized dataset (about 27 incidents) that keeps every scenario type.
+# Used for the fully local Ollama + LangFlow build (docs/LOCAL_LANGFLOW.md).
+small:
+  days: 3
+  decoy_scenarios: 2
+  attack_plan: {full: 3, no_exec: 1, stealthy: 1, partial: 1, degraded: 2, injected: 2, admin_compromise: 1}
+  benign_plan: {newsletter_click: 2, travel_signin: 2, dev_encoded_ps: 2, admin_enum: 2, quarterly_export: 2,
+                backup_job: 2, new_laptop: 2}
+
 pipeline:
   sources: [email, identity, endpoint, cloud]
   required_sources: [email, identity, endpoint, cloud]
@@ -61,6 +70,14 @@ agent:
   num_ctx: 8192               # context window; Ollama's smaller default can silently cut long prompts
   rag_top_k: 3
   max_tool_calls: 6           # agentic mode: tool budget per incident
+  langflow:                   # --backend langflow (docs/LOCAL_LANGFLOW.md)
+    url: http://localhost:7860
+    api_key_env: LANGFLOW_API_KEY   # name of the environment variable holding your LangFlow API key
+    timeout_seconds: 900
+    flows:                    # the endpoint name you give each flow in LangFlow
+      rag: triage-rag               # Chroma with knowledge/ notes -> Ollama
+      no_rag: triage-norag          # no retrieval -> Ollama
+      poisoned: triage-poisoned     # Chroma with knowledge/ + knowledge_poison/ -> Ollama
 
 attack:
   attack_version: "18"        # pin the ATT&CK version you validated IDs against

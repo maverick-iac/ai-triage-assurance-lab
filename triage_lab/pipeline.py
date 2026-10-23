@@ -63,6 +63,14 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
     retriever = Retriever(poison=poison) if rag else None
     agent = Agent(backend, temperature, run_index)
     agent.playbook = playbook
+    bundle_retriever = retriever
+    if agent.backend == "langflow":
+        if mode == "agentic":
+            agent.flow = None              # the tool loop talks to Ollama directly; the tools do the retrieval
+        else:                              # the LangFlow flow does the retrieval itself
+            flows = agent.lf_flows
+            agent.flow = flows["poisoned"] if poison else flows["rag"] if rag else flows["no_rag"]
+            bundle_retriever = None
     retries = settings()["gates"]["verifier_retries"]
     baseline = Baseline(events)
 
@@ -86,7 +94,7 @@ def run(name: str = "main", backend: str | None = None, mode: str = "evidence", 
                 done[key]["incident_id"] = inc.id
                 continue
             row = _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events, events_by_id,
-                              alerts_by_id, lq, users, retriever, name, baseline, framing)
+                              alerts_by_id, lq, users, bundle_retriever, name, baseline, framing)
             fh.write(json.dumps(row) + "\n")
             fh.flush()
             row["incident_key"] = key

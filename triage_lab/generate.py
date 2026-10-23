@@ -290,8 +290,10 @@ def main() -> None:
     # one scenario per 2-hour slot, so scenarios never overlap in time
     slots = [start + timedelta(hours=2 * i + 1) for i in range(cfg["days"] * 12 - 1)]
     rng.shuffle(slots)
-    plan = [("attack", v) for v, n in ATTACK_PLAN for _ in range(n)] + \
-           [("benign", v) for v, n in BENIGN_PLAN for _ in range(n)]
+    attack_plan = list(cfg.get("attack_plan", {}).items()) or ATTACK_PLAN    # the small preset overrides these
+    benign_plan = list(cfg.get("benign_plan", {}).items()) or BENIGN_PLAN
+    plan = [("attack", v) for v, n in attack_plan for _ in range(n)] + \
+           [("benign", v) for v, n in benign_plan for _ in range(n)]
     assert len(plan) <= len(slots), "not enough time slots; raise generator.days"
     scenarios = []
     for i, ((kind, variant), t0) in enumerate(zip(plan, slots)):

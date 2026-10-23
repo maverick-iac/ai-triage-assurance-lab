@@ -1,7 +1,10 @@
 """Stage 5b: the AI triage agent.
 
-Three interchangeable backends:
-  ollama  a real local model through Ollama (what you report results from)
+Four interchangeable backends:
+  ollama    a real local model through Ollama (what you report results from)
+  langflow  your own LangFlow flows (RAG + Ollama model) do the triage and critic calls;
+            the agentic tool loop, gap loop and repeats still call Ollama directly
+            (docs/LOCAL_LANGFLOW.md)
   replay  re-reads saved Ollama answers from results/cache, so a demo is
           instant and identical every time
   stub    a deliberately naive rule-based stand-in. It is NOT AI. It exists so
@@ -17,8 +20,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
+import urllib.error
 import urllib.request
 
 from .config import path, settings
@@ -174,12 +179,23 @@ class Agent:
         self.timeout = cfg["timeout_seconds"]
         self.num_ctx = cfg.get("num_ctx", 8192)
         self.playbook = True                           # False for the no_playbook run
+        lf = cfg.get("langflow", {})
+        self.lf_url = lf.get("url", "http://localhost:7860").rstrip("/")
+        self.lf_key = os.environ.get(lf.get("api_key_env", "LANGFLOW_API_KEY"), "")
+        self.lf_flows = lf.get("flows", {})
+        self.lf_timeout = lf.get("timeout_seconds", 900)
+        # which flow answers triage/critic calls; None = call Ollama directly (set per run by the pipeline)
+        self.flow = self.lf_flows.get("rag") if self.backend == "langflow" else None
         self.cache_dir = path("results_dir") / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def label(self) -> str:
-        return "stub (rule-based stand-in, not AI)" if self.backend == "stub" else f"{self.backend}:{self.model}"
+        if self.backend == "stub":
+            return "stub (rule-based stand-in, not AI)"
+        if self.backend == "langflow":
+            return f"langflow:{self.flow or 'ollama-direct'}:{self.model}"
+        return f"{self.backend}:{self.model}"
 
     def triage(self, bundle: dict, history: list[dict] | None = None) -> tuple[dict | None, str, float]:
         """Returns (parsed verdict or None, raw text, seconds)."""
@@ -193,6 +209,11 @@ class Agent:
         else:
             try:
                 raw = self._cached_call(messages)
+            except urllib.error.URLError as exc:
+                if self.backend == "langflow" and not isinstance(getattr(exc, "reason", None), TimeoutError):
+                    raise RuntimeError(f"LangFlow is not reachable or rejected the call ({exc}). "
+                                       "Run: python -m triage_lab doctor --backend langflow") from exc
+                raw = f"MODEL ERROR: {exc}"
             except Exception as exc:                   # timeout, Ollama down, out of memory...
                 raw = f"MODEL ERROR: {exc}"            # -> parse fails -> the incident escalates
         return parse_json(raw), raw, round(time.time() - t0, 2)
@@ -218,7 +239,7 @@ class Agent:
                      + "\n<proposed_verdict>\n" + json.dumps({k: verdict.get(k) for k in
                        ("decision", "verdict", "confidence", "summary")}) + "\n</proposed_verdict>"}]
         try:
-            raw = self._cached_message(messages, json_mode=True)["content"]
+            raw = self._cached_call(messages)
         except FileNotFoundError:
             raise
         except Exception as exc:
@@ -231,7 +252,21 @@ class Agent:
         return hashlib.sha256(blob.encode()).hexdigest()[:24]
 
     def _cached_call(self, messages: list[dict], json_mode: bool = True) -> str:
+        if self.backend == "langflow" and self.flow:
+            return self._langflow_call(messages)
         return self._cached_message(messages, json_mode=json_mode)["content"]
+
+    # ---- LangFlow: your flow does retrieval (Chroma) and calls the Ollama model ----------
+    def _langflow_call(self, messages: list[dict]) -> str:
+        text = flatten_for_langflow(messages)
+        key = hashlib.sha256(json.dumps({"langflow": self.flow, "model": self.model, "text": text},
+                                        sort_keys=True).encode()).hexdigest()[:24]
+        f = self.cache_dir / f"lf_{key}.json"
+        if f.exists():
+            return json.loads(f.read_text(encoding="utf-8"))["raw"]
+        raw = langflow_run(self.lf_url, self.flow, text, self.lf_key, self.lf_timeout)
+        f.write_text(json.dumps({"flow": self.flow, "model": self.model, "raw": raw}), encoding="utf-8")
+        return raw
 
     def _cached_message(self, messages: list[dict], tools: list[dict] | None = None,
                         json_mode: bool = True) -> dict:
@@ -257,6 +292,97 @@ class Agent:
                **({"tool_calls": msg["tool_calls"]} if msg.get("tool_calls") else {})}
         f.write_text(json.dumps({"model": self.model, "message": msg}), encoding="utf-8")
         return msg
+
+
+# ---- LangFlow helpers ---------------------------------------------------------
+def flatten_for_langflow(messages: list[dict]) -> str:
+    """A LangFlow chat flow takes ONE text input. The lab sends the incident, then the
+    instructions, then (on a self-correction retry) the previous answer, as one message; the flow
+    adds the retrieved notes and calls the model. The incident comes FIRST because the flow also
+    uses this text as its search query, and embedding models read only the start of a long text:
+    the alerts at the top are what the notes should match. The instructions come from the lab so
+    LangFlow, Kaggle and local runs all use identical wording."""
+    system = [m.get("content") or "" for m in messages if m["role"] == "system"]
+    rest = [m for m in messages if m["role"] != "system"]
+    parts = []
+    for i, m in enumerate(rest):
+        c = m.get("content") or ""
+        if m["role"] == "assistant":
+            parts.append(f"<your_previous_answer>\n{c}\n</your_previous_answer>")
+        else:
+            parts.append(c.replace("<knowledge>\nNone.\n</knowledge>\n", ""))   # the flow supplies the notes
+        if i == 0:
+            parts += system                        # instructions right after the incident
+    return "\n\n".join(parts)
+
+
+def langflow_run(base_url: str, flow: str, text: str, api_key: str = "", timeout: int = 900) -> str:
+    """POST /api/v1/run/<flow id or endpoint name> and return the flow's chat output text."""
+    body = json.dumps({"input_value": text, "input_type": "chat", "output_type": "chat"}).encode()
+    headers = {"Content-Type": "application/json", **({"x-api-key": api_key} if api_key else {})}
+    req = urllib.request.Request(f"{base_url}/api/v1/run/{flow}?stream=false", data=body, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return langflow_text(json.loads(resp.read()))
+
+
+def langflow_text(resp: dict) -> str:
+    """Pull the chat output text out of a LangFlow /run response (the nesting varies by version)."""
+    def walk(node):
+        if isinstance(node, dict):
+            msg = node.get("message")
+            if isinstance(msg, dict) and isinstance(msg.get("text"), str):
+                return msg["text"]
+            if isinstance(node.get("text"), str) and node.get("text"):
+                return node["text"]
+            for k in ("outputs", "results", "messages", "data", "artifacts"):
+                if k in node:
+                    found = walk(node[k])
+                    if found:
+                        return found
+        elif isinstance(node, list):
+            for x in node:
+                found = walk(x)
+                if found:
+                    return found
+        return None
+    text = walk(resp)
+    if text is None:
+        raise ValueError("LangFlow returned no chat text; check the flow ends in a Chat Output component")
+    return text
+
+
+def doctor(backend: str | None = None) -> bool:
+    """Check the local setup before a long run: Ollama up, model pulled, LangFlow flows answering."""
+    cfg = settings()["agent"]
+    backend = backend or cfg["backend"]
+    ok = True
+    base = cfg["ollama_url"].rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=10) as r:
+            models = [m["name"] for m in json.loads(r.read()).get("models", [])]
+        print(f"[ok]   Ollama is running at {base}")
+        if cfg["model"] in models or f"{cfg['model']}:latest" in models:
+            print(f"[ok]   model {cfg['model']} is pulled")
+        else:
+            ok = False
+            print(f"[FAIL] model {cfg['model']} not found. Run: ollama pull {cfg['model']}   (have: {models})")
+    except Exception as exc:
+        ok = False
+        print(f"[FAIL] Ollama not reachable at {base}: {exc}. Start the Ollama app (or run: ollama serve)")
+    if backend == "langflow":
+        agent = Agent("langflow")
+        if not agent.lf_key:
+            print("[info] no LANGFLOW_API_KEY set; fine if your LangFlow doesn't require one")
+        for role, flow in agent.lf_flows.items():
+            try:
+                t0 = time.time()
+                out = langflow_run(agent.lf_url, flow, "Reply with the single word READY.", agent.lf_key, 300)
+                print(f"[ok]   LangFlow flow '{flow}' ({role}) answered in {time.time() - t0:.0f}s: {out.strip()[:60]!r}")
+            except Exception as exc:
+                ok = False
+                print(f"[FAIL] LangFlow flow '{flow}' ({role}) at {agent.lf_url}: {exc}")
+    print("All checks passed." if ok else "Fix the [FAIL] lines above, then run doctor again.")
+    return ok
 
 
 # ---- stub: a naive analyst used only for wiring, tests and CI ---------------

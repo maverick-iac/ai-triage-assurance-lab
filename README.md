@@ -112,6 +112,16 @@ python -m triage_lab demo --run main                    # the demo script
 **No GPU? Run on Kaggle for free**, one stage per session, resuming the next day:
 see [docs/KAGGLE.md](docs/KAGGLE.md) and `kaggle/ai_triage_kaggle.ipynb`.
 
+**Fully local with LangFlow:** build the triage agent, its RAG (Chroma) and the critic as
+LangFlow flows on your own laptop with `qwen2.5:3b`, and the lab tests them with the same
+answer key and controls on a small dataset (about 23 incidents, every scenario type):
+see [docs/LOCAL_LANGFLOW.md](docs/LOCAL_LANGFLOW.md).
+
+```bash
+python -m triage_lab doctor --backend langflow                      # Ollama + your flows answering?
+python -m triage_lab stage main --backend langflow --dataset small  # results in results_small/
+```
+
 ```bash
 python -m triage_lab stage main    --backend ollama --model qwen2.5:7b   # resumable batches
 python -m triage_lab stage agentic --backend ollama --model qwen2.5:7b   # agentic + critic runs
@@ -145,6 +155,7 @@ Replace this with your own `ollama` results once you have them.
 |---|---|
 | [docs/BUILD_GUIDE.md](docs/BUILD_GUIDE.md) | Step-by-step build for beginners, one stage at a time, with diagrams |
 | [docs/KAGGLE.md](docs/KAGGLE.md) | Run every stage on Kaggle's free GPU and resume day by day |
+| [docs/LOCAL_LANGFLOW.md](docs/LOCAL_LANGFLOW.md) | Fully local: build the agent, RAG and critic in LangFlow with Ollama 3B |
 | [docs/METRICS.md](docs/METRICS.md) | Every metric at every stage: what it means, how it's computed, target |
 | [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md) | How to run a clean demo, with script and fallbacks |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Trust boundaries and STRIDE-AI threats at each crossing |

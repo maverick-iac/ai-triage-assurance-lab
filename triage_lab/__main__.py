@@ -15,7 +15,9 @@
   all                      generate + every run + gaploop + score + demo
 
 Common options: --backend stub|ollama|replay   --model qwen2.5:7b   --resume
-                --dataset main|heldout   (heldout: a second dataset from another seed, never tuned on)
+                --dataset main|heldout|small   (heldout: another seed, never tuned on;
+                                                small: ~27 incidents for a laptop, see docs/LOCAL_LANGFLOW.md)
+  doctor                   check Ollama (and LangFlow flows, with --backend langflow) before a long run
 """
 
 from __future__ import annotations
@@ -52,11 +54,11 @@ def _tag(model: str) -> str:
 
 def main(argv: list[str] | None = None) -> None:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--backend", choices=["stub", "ollama", "replay"])
+    common.add_argument("--backend", choices=["stub", "ollama", "replay", "langflow"])
     common.add_argument("--model", help="override agent.model, e.g. qwen2.5:7b")
     common.add_argument("--resume", action="store_true", help="skip incidents already finished in a run")
-    common.add_argument("--dataset", choices=["main", "heldout"], default="main",
-                        help="heldout = data_heldout/ + results_heldout/, generated with another seed")
+    common.add_argument("--dataset", choices=["main", "heldout", "small"], default="main",
+                        help="heldout = data_heldout/ (another seed); small = data_small/ (~27 incidents)")
 
     p = argparse.ArgumentParser(prog="triage_lab", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -85,10 +87,11 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("score", parents=[common])
     gr = sub.add_parser("grade", parents=[common])
     gr.add_argument("--judge", choices=["stub", "ollama"], help="LLM judge for misattribution (default: rules)")
-    d = sub.add_parser("demo")
+    sub.add_parser("doctor", parents=[common])
+    d = sub.add_parser("demo", parents=[common])
     d.add_argument("--run", default="main")
     sub.add_parser("gaploop", parents=[common])
-    cs = sub.add_parser("cases")
+    cs = sub.add_parser("cases", parents=[common])
     cs.add_argument("--run", nargs="*", help="run names (default: every run)")
     w = sub.add_parser("ingest-windows")
     w.add_argument("--events", required=True)
@@ -98,8 +101,11 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("all", parents=[common])
 
     args = p.parse_args(argv)
-    if getattr(args, "dataset", "main") == "heldout" or (args.cmd == "stage" and args.name == "heldout"):
-        use_heldout()
+    dataset = getattr(args, "dataset", "main")
+    if args.cmd == "stage" and args.name == "heldout":
+        dataset = "small_heldout" if dataset == "small" else "heldout"
+    if dataset != "main":
+        use_dataset(dataset)
     if getattr(args, "model", None):
         from .config import override
         override("agent.model", args.model)
@@ -128,6 +134,9 @@ def main(argv: list[str] | None = None) -> None:
         _score()
     if args.cmd == "grade":
         _grade(args.judge)
+    if args.cmd == "doctor":
+        from .agent import doctor
+        sys.exit(0 if doctor(backend) else 1)
     if args.cmd in ("demo", "all"):
         from .demo import main as demo
         print(demo(getattr(args, "run", "main")))
@@ -140,13 +149,20 @@ def main(argv: list[str] | None = None) -> None:
         print(ingest(Path(args.events), Path(args.labels), args.shift_to, args.as_user))
 
 
-def use_heldout() -> None:
-    """Point every stage at a second, independently generated dataset (another seed), so a
-    prompt or threshold tuned on the main dataset can be checked on scenarios it never saw."""
+def use_dataset(name: str) -> None:
+    """Point every stage at another dataset folder and its own results folder.
+      heldout        same size, another seed: checks a prompt tuned on the main dataset
+      small          ~27 incidents, every scenario type: for a laptop (Ollama + LangFlow, 3B)
+      small_heldout  small, another seed"""
     from .config import override, settings
-    override("paths.data_dir", "data_heldout")
-    override("paths.results_dir", "results_heldout")
-    override("generator.seed", settings()["generator"].get("heldout_seed", 11))
+    gen = settings()["generator"]
+    override("paths.data_dir", f"data_{name}")
+    override("paths.results_dir", f"results_{name}")
+    if name.startswith("small"):
+        for k, v in settings().get("small", {}).items():
+            override(f"generator.{k}", v)
+    if name.endswith("heldout"):
+        override("generator.seed", gen.get("heldout_seed", 11))
 
 
 def _grade(judge_backend) -> None:
