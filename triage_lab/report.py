@@ -51,11 +51,13 @@ def render(m: dict) -> str:
     s += ["## 5. Triage: AI alone (baseline) vs AI + controls (assured)"]
     rows = []
     for name, t in m["triage"].items():
-        for arm in ("baseline", "assured", "critic_only"):
+        for arm in ("baseline", "assured_v1", "assured", "critic_only"):
             if arm not in t:
                 continue
             a = t[arm]
-            rows.append([name, arm, f"{a['fn']}", f"{a['false_close_rate']} {a['false_close_rate_ci95']}",
+            label = {"assured": "assured (controls v2)" if "assured_v1" in t else "assured",
+                     "assured_v1": "assured (controls v1)"}.get(arm, arm)
+            rows.append([name, label, f"{a['fn']}", f"{a['false_close_rate']} {a['false_close_rate_ci95']}",
                          f"{a['f2']} {a['f2_ci95']}", a["recall"], a["precision"], a["mcc"], a["escalation_rate"]])
     s += [_table(["Run", "Arm", "False closes", "False-close rate [95% CI]", "F2 [95% CI]", "Recall",
                   "Precision", "MCC", "Escalation rate"], rows), ""]

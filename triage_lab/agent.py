@@ -195,6 +195,8 @@ class Agent:
             return "stub (rule-based stand-in, not AI)"
         if self.backend == "langflow":
             return f"langflow:{self.flow or 'ollama-direct'}:{self.model}"
+        if self.backend == "replay":                   # same answers, re-read from the cache
+            return f"ollama:{self.model}"
         return f"{self.backend}:{self.model}"
 
     def triage(self, bundle: dict, history: list[dict] | None = None) -> tuple[dict | None, str, float]:

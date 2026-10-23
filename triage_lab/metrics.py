@@ -211,7 +211,8 @@ def _parent(t: str) -> str:
 
 
 def arms_of(rows: list[dict]) -> list[str]:
-    return ["baseline", "assured"] + (["critic_only"] if rows and "critic_only" in rows[0] else [])
+    return (["baseline", "assured"] + (["assured_v1"] if rows and "assured_v1" in rows[0] else [])
+            + (["critic_only"] if rows and "critic_only" in rows[0] else []))
 
 
 def triage_metrics(rows: list[dict], by_event, scenarios, incidents, labels=None) -> dict:

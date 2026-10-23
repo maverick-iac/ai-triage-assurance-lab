@@ -123,6 +123,15 @@ Limits: the deterministic grader decides misattribution with a keyword rule (a c
 calls the event legitimate, routine, newsletter... is not misattribution); `grade --judge
 ollama` uses a model instead. Gates check what was *stated*, not whether it was stated well.
 
+## 5e. Controls v1 vs v2
+
+Every run reports two "with controls" arms: `assured_v1` (the original gates) and `assured`
+(controls v2 = v1 + the multi-stage chain gate, `gates.multi_stage_min_tactics`). The v2 gate was
+added after the `fp_framing` ablation showed four two-tactic attacks passing every v1 gate. Because
+gates are code, `python -m triage_lab regate` re-applies them to every run from the saved model
+answers in seconds, with no new model calls; a missing answer stops it rather than asking the model.
+Report both arms, and check the v2 gate on the held-out set, which it was not designed against.
+
 ## 6. Controls, self-correction and adversarial tests
 
 | Metric | Plain meaning | Key | Target |

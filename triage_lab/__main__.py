@@ -11,6 +11,8 @@
   demo                     the demo script
   gaploop                  draft, backtest and refine rules for missed techniques
   cases                    write a readable handover case file per incident (results/cases/<run>/)
+  regate                   re-apply the current gates to every finished run from SAVED answers (no new
+                           model calls; a missing answer stops it), then score
   ingest-windows           add live Atomic Red Team / Sysmon events
   all                      generate + every run + gaploop + score + demo
 
@@ -75,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--limit", type=int, help="only the first N incidents (quick test)")
 
     st = sub.add_parser("stage", parents=[common])
-    st.add_argument("name", choices=list(STAGES) + ["heldout", "repeat", "gaploop", "score", "all"])
+    st.add_argument("name", choices=list(STAGES) + ["heldout", "repeat", "gaploop", "regate", "score", "all"])
     st.add_argument("-k", type=int, default=3, help="repeats for the repeat stage")
     st.add_argument("--limit", type=int)
 
@@ -88,6 +90,7 @@ def main(argv: list[str] | None = None) -> None:
     gr = sub.add_parser("grade", parents=[common])
     gr.add_argument("--judge", choices=["stub", "ollama"], help="LLM judge for misattribution (default: rules)")
     sub.add_parser("doctor", parents=[common])
+    sub.add_parser("regate", parents=[common])
     d = sub.add_parser("demo", parents=[common])
     d.add_argument("--run", default="main")
     sub.add_parser("gaploop", parents=[common])
@@ -134,6 +137,9 @@ def main(argv: list[str] | None = None) -> None:
         _score()
     if args.cmd == "grade":
         _grade(args.judge)
+    if args.cmd == "regate":
+        _regate()
+        _score()
     if args.cmd == "doctor":
         from .agent import doctor
         sys.exit(0 if doctor(backend) else 1)
@@ -182,6 +188,37 @@ def _grade(judge_backend) -> None:
               f"{g['incidents']}) misattribution rate {g['misattribution']['rate']} grader {g['grader']}")
 
 
+def _regate() -> None:
+    """Gates are code, so a change to them is re-evaluated against the SAME model answers:
+    every finished run is replayed from results/cache (no model calls) and its rows rewritten."""
+    from .config import override, path
+    from .pipeline import run
+    from .schema import read_jsonl
+    for f in sorted((path("results_dir") / "runs").glob("*.jsonl")):
+        name = f.stem
+        rows = list(read_jsonl(f))
+        if not rows:
+            continue
+        base = name.split("__")[0]
+        if base in RUNS:
+            opts = dict(RUNS[base])
+        elif base.startswith("repeat_") and base[7:].isdigit():
+            opts = {"temperature": 0.7, "run_index": int(base[7:])}
+        else:
+            print(f"skip {name}: not a named run")
+            continue
+        kind, _, model = rows[0]["backend"].partition(":")
+        if kind.startswith("stub"):
+            backend = "stub"
+        elif kind == "langflow":
+            backend, model = "langflow", model.split(":", 1)[1]
+        else:
+            backend = "replay"
+        override("agent.model", model)
+        out = run(name, backend, quiet=True, resume=False, **opts)
+        print(f"regated {name}: {len(out)} incidents from saved answers ({backend}, {model})")
+
+
 def _runs(names: list[str], backend, resume: bool, suffix: str = "", limit: int | None = None) -> None:
     from .pipeline import run
     for name in names:
@@ -204,6 +241,8 @@ def _stage(args, backend) -> None:
     if args.name in STAGES:
         suffix = f"__{_tag(settings()['agent']['model'])}" if args.name == "bigger_model" else ""
         _runs(STAGES[args.name], backend, resume=True, suffix=suffix, limit=args.limit)
+    elif args.name == "regate":                       # no GPU needed: replays saved answers
+        _regate()
     elif args.name == "heldout":                      # data_dir already points at data_heldout/
         _runs(["main"], backend, resume=True, limit=args.limit)
     elif args.name == "repeat":

@@ -69,6 +69,12 @@ dies: commit the same stage again and finished incidents are skipped.
 You can combine stages in one session if the time allows; just run them one after another
 with the previous output attached.
 
+**Attach every previous output you want to keep.** The notebook merges all attached outputs, so
+attaching the `main` version and the `ablations` version together carries both forward.
+
+**`regate`** (no GPU: set Accelerator = None) re-applies the current gates to every finished run
+from saved answers. Run it once after uploading a project version that changes the gates.
+
 ## Getting results onto your laptop
 
 1. Open the latest version, go to **Output**, and download `results_<stage>.zip`. The `state/`

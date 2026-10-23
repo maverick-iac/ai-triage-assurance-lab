@@ -88,6 +88,8 @@ def main(run_name: str = "main") -> str:
     out += [_bar(f"SCOREBOARD - all {t['incidents']} incidents"),
             f"{'':38}{'AI alone':>14}{'AI + controls':>16}",
             f"{'Real attacks wrongly closed':38}{b['fn']:>14}{a['fn']:>16}",
+            *([f"{'  ...with the original v1 controls':38}{'':>14}{t['assured_v1']['fn']:>16}"]
+              if "assured_v1" in t else []),
             f"{'False-close rate':38}{b['false_close_rate']:>14}{a['false_close_rate']:>16}",
             f"{'F2 (recall-weighted)':38}{b['f2']:>14}{a['f2']:>16}",
             f"{'Sent to a human (escalation rate)':38}{b['escalation_rate']:>14}{a['escalation_rate']:>16}",

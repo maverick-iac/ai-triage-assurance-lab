@@ -86,7 +86,8 @@ another seed (`stage heldout`) to show the tuning wasn't overfitted.
 | Privileged identity | The user is an admin or service account | Context talking the AI out of an alert |
 | Crown jewel + first seen | The incident touches a crown-jewel asset (`data/assets.csv`) **and** the behaviour is new for this user (7-day baseline) | Closing the one alert that matters most |
 | Prompt-injection guard | Evidence contains text addressed to an AI | Attacker instructions hidden in data |
-| Risk ceiling | The incident spans several attack stages | Auto-closing a multi-stage chain |
+| Risk ceiling | The incident's risk score is high | Auto-closing a multi-stage chain |
+| Multi-stage chain (**v2**) | The incident spans two or more ATT&CK tactics | Added after the `fp_framing` ablation: four two-stage attacks (phishing click + encoded PowerShell) slipped past every v1 gate when a colleague asked "is this a false positive?". Reports show v1 and v2 side by side |
 | Confidence | The model is unsure | Low-confidence closes |
 
 ## Quick start

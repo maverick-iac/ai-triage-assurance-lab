@@ -157,6 +157,7 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
         if v1:
             v, c = v1, verify(v1, bundle)
     assured, reasons = apply_gates(v, c, bundle)
+    assured_v1, _ = apply_gates(v, c, bundle, version="v1")     # the original controls, kept for comparison
 
     crit, crit_valid, critic_only = None, False, baseline
     if critic and v0 and v0["decision"] == "close":
@@ -170,6 +171,8 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
             critic_only = "escalate"
             if assured == "close":
                 assured = "escalate"
+            if assured_v1 == "close":
+                assured_v1 = "escalate"
             reasons = reasons + [f"critic objection: {crit['argument'][:80]}"]
 
     return {
@@ -192,7 +195,8 @@ def _triage_one(inc, agent, mode, context, rag, poison, critic, retries, events,
         "first_seen": [c for c in bundle["gate_context"]["baseline"]["first_seen_checks"] if not c["seen_before"]],
         "check_first": c0, "check_final": c, "retried": used_retry,
         "final_model_decision": v["decision"] if v else "escalate",
-        "baseline": baseline, "assured": assured, "gate_reasons": reasons,
+        "baseline": baseline, "assured": assured, "assured_v1": assured_v1, "gate_reasons": reasons,
+        "controls_version": settings()["gates"].get("controls_version", "v1"),
         **({"critic_only": critic_only, "critic_review": crit, "critic_objection_valid": crit_valid}
            if critic else {}),
         "trajectory": trajectory, "invalid_tool_calls": invalid_calls, "agentic_fallback": fallback,

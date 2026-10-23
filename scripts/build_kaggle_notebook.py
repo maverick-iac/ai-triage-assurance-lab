@@ -30,12 +30,13 @@ then saves the whole project state to this version's **Output**.
 | `heldout` | main run on a second dataset (another seed) you never tuned on | 30-50 min |
 | `repeat` | 3 repeats of main for pass^k | 1-2 h |
 | `gaploop` | AI drafts, backtests and revises detection rules | 10-20 min |
+| `regate` | re-apply the current gates to every finished run from saved answers (no GPU needed) | 1 min |
 | `score` | metrics + report from everything so far (no GPU needed) | 1 min |
 
 Runs are resumable: if a session dies, commit the same stage again with the last output attached;
 finished incidents are skipped and saved model answers are reused."""),
     ("code", """# ---- settings: change these each session --------------------------------
-STAGE = "test"            # test | main | ablations | agentic | bigger_model | heldout | repeat | gaploop | score
+STAGE = "test"            # test | main | ablations | agentic | bigger_model | heldout | repeat | gaploop | regate | score
 MODEL = "qwen2.5:7b"      # keep ONE model for all reported runs; bigger_model uses a bigger one
 GITHUB_URL = ""           # e.g. "https://github.com/<you>/ai-triage-assurance-lab.git" (leave "" to use the dataset)
 BACKEND = "ollama"        # "stub" only for a dry run without a model
@@ -102,7 +103,7 @@ def sh(cmd):
     print("$", cmd)
     subprocess.run(cmd, shell=True, check=True)
 
-if BACKEND == "ollama" and STAGE != "score":
+if BACKEND == "ollama" and STAGE not in ("score", "regate"):
     sh("nvidia-smi --query-gpu=name,memory.total --format=csv || true")
     sh("(apt-get -qq update && apt-get -qq install -y zstd pciutils lshw) > /dev/null 2>&1 || true")
     if shutil.which("ollama") is None:

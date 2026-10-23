@@ -29,8 +29,16 @@ def injection_hits(bundle: dict) -> list[str]:
     return hits
 
 
-def apply_gates(verdict: dict | None, check: dict | None, bundle: dict) -> tuple[str, list[str]]:
+def chain_tactics(bundle: dict) -> list[str]:
+    tactic = settings()["attack"]["tactic"]
+    return sorted({tactic[t] for a in bundle.get("alerts", []) for t in a.get("techniques", []) if t in tactic})
+
+
+def apply_gates(verdict: dict | None, check: dict | None, bundle: dict,
+                version: str | None = None) -> tuple[str, list[str]]:
+    """version: 'v1' = the original gates; 'v2' adds the multi-stage chain gate. Default: settings."""
     g = settings()["gates"]
+    version = version or g.get("controls_version", "v1")
     required = settings()["pipeline"]["required_sources"]
     if verdict is None:
         return "escalate", ["AI output was not valid JSON"]
@@ -59,6 +67,10 @@ def apply_gates(verdict: dict | None, check: dict | None, bundle: dict) -> tuple
         new = [c for c in (gc.get("baseline") or {}).get("first_seen_checks", []) if not c["seen_before"]]
         if jewels and new:
             reasons.append(f"crown-jewel asset {jewels[0]} with first-seen behaviour: {new[0]['value']}")
+    if version >= "v2" and g.get("multi_stage_min_tactics"):
+        tactics = chain_tactics(bundle)
+        if len(tactics) >= g["multi_stage_min_tactics"]:
+            reasons.append(f"multi-stage chain: {len(tactics)} ATT&CK tactics ({', '.join(tactics)})")
     if bundle.get("risk", 0) > g["max_risk_to_close"]:
         reasons.append(f"high-risk incident: risk {bundle['risk']} > {g['max_risk_to_close']}")
     if g["injection_guard"]:

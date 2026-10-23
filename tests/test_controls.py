@@ -101,3 +101,22 @@ def test_parse_json_accepts_wrapped_answer():
 
 def test_parse_json_rejects_bad_decision():
     assert parse_json('{"decision": "ignore", "verdict": "x", "confidence": 1, "claims": []}') is None
+
+
+def test_v2_gate_escalates_a_two_tactic_chain_v1_lets_through(bundle, good_close):
+    from triage_lab.gates import apply_gates
+    from triage_lab.verifier import verify
+    b = dict(bundle, alerts=[{"alert_id": "A1", "rule": "DET-001", "title": "t", "level": "medium",
+                              "techniques": ["T1566.002"], "event_ids": ["E1"]},
+                             {"alert_id": "A2", "rule": "DET-002", "title": "t", "level": "high",
+                              "techniques": ["T1059.001"], "event_ids": ["E2"]}])
+    check = verify(good_close, b)
+    assert apply_gates(good_close, check, b, version="v1")[0] == "close"
+    decision, reasons = apply_gates(good_close, check, b, version="v2")
+    assert decision == "escalate" and any("multi-stage chain" in r for r in reasons)
+
+
+def test_v2_gate_ignores_a_single_tactic_incident(bundle, good_close):
+    from triage_lab.gates import apply_gates
+    from triage_lab.verifier import verify
+    assert apply_gates(good_close, verify(good_close, bundle), bundle, version="v2")[0] == "close"
