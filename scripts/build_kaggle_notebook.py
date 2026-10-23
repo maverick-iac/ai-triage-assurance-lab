@@ -161,6 +161,8 @@ if STAGE == "test":
         print("   ", r["summary"][:160])
 else:
     rep = Path("results_heldout/REPORT.md" if STAGE == "heldout" else "results/REPORT.md").read_text()
+    if "## Precision and recall" in rep:
+        print(rep[rep.find("## Precision and recall"): rep.find("## 1. Emulation")])
     print(rep[rep.find("## 5."): rep.find("### Run")])
     if "## 6. Investigation" in rep:
         print(rep[rep.find("## 6. Investigation"): rep.find("Gate pass rates")])

@@ -420,6 +420,81 @@ def consistency(runs: list[list[dict]], by_event, scenarios, incidents) -> dict:
     return out
 
 
+def _pr(tp, fp, fn):
+    p = round(tp / (tp + fp), 3) if tp + fp else None
+    r = round(tp / (tp + fn), 3) if tp + fn else None
+    return p, r
+
+
+def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
+    """One row per stage: what counts as a 'positive' there, its precision and its recall.
+    Precision = of what this stage flagged, how much was right. Recall = of what it should have
+    flagged, how much it caught. Built only from metrics already computed."""
+    rows = []
+
+    def add(stage, positive, p, r, note=""):
+        rows.append({"stage": stage, "positive": positive, "precision": p, "recall": r, "note": note})
+
+    lq = m["log_quality"]
+    flagged = sum(v["unhealthy_hours"] for v in lq["per_source"].values())
+    good = flagged - lq.get("false_unhealthy_hours", 0)
+    add("2 Log quality", "an hour flagged as broken logging",
+        round(good / flagged, 3) if flagged else None, lq.get("outage_detection_recall"),
+        f"{lq.get('outage_hours_injected')} outage hours injected")
+
+    d = m["detection"]
+    alerts = sum(v["alerts"] for v in d["per_rule"].values())
+    tp_alerts = sum(v["true_positive_alerts"] for v in d["per_rule"].values())
+    n = {t: sum(v["levels"].values()) - v["levels"].get("not observable", 0) for t, v in d["per_technique"].items()}
+    rec = (sum(v["recall_with_behavioural"] * n[t] for t, v in d["per_technique"].items()) / sum(n.values())
+           if sum(n.values()) else None)
+    add("3 Detection", "an alert on a malicious event", round(tp_alerts / alerts, 3) if alerts else None,
+        round(rec, 3) if rec is not None else None, "recall over logged attack events, Sigma + behavioural")
+
+    c = m["correlation"]
+    add("4 TTP correlation", "an incident that is one whole attack chain",
+        round(1 - c["over_merged_incidents"] / c["incidents"], 3) if c["incidents"] else None,
+        c["chain_reconstruction_accuracy"], "precision = incidents not glued together; recall = chains kept whole")
+
+    tri = m.get("triage", {})
+    name = run if run in tri else ("main" if "main" in tri else next(iter(tri), None))
+    if name:
+        t = tri[name]
+        mo = t["model"]
+        add(f"5 Triage, AI alone ({name})", "escalate (malicious)", t["baseline"]["precision"], t["baseline"]["recall"],
+            f"F2 {t['baseline']['f2']}, false closes {t['baseline']['fn']}")
+        if "assured_v1" in t:
+            add(f"5 Triage, controls v1 ({name})", "escalate (malicious)", t["assured_v1"]["precision"],
+                t["assured_v1"]["recall"], f"F2 {t['assured_v1']['f2']}, false closes {t['assured_v1']['fn']}")
+        add(f"5 Triage, controls ({name})", "escalate (malicious)", t["assured"]["precision"], t["assured"]["recall"],
+            f"F2 {t['assured']['f2']}, false closes {t['assured']['fn']}")
+        add("5 Evidence (what reached the AI)", "an attack event put in front of the AI", None,
+            t.get("evidence_recall_mean"), "recall only: unrelated events are not a mistake")
+        add("5b Claims (verifier)", "an observed claim that checks out against its event",
+            mo.get("faithfulness_mean"), None, "precision = faithfulness")
+        if t.get("rag"):
+            add("5 RAG retrieval", "a relevant knowledge note", t["rag"]["context_precision"],
+                t["rag"]["hit_rate_at_k"], "recall = hit rate@k (the technique's note was retrieved)")
+        g = t["gates"]
+        p, r = _pr(g["false_closes_caught"], g["benign_alerts_sent_to_human_by_gates"],
+                   t["baseline"]["fn"] - g["false_closes_caught"])
+        add("6 Gates (catching AI false closes)", "a close the gates overrule", p, r,
+            f"{g['false_closes_caught']} caught, {g['benign_alerts_sent_to_human_by_gates']} benign sent to a human")
+        crit = next((tri[n]["critic"] for n in ("main_critic", "agentic_critic", name) if n in tri and "critic" in tri[n]),
+                    None)
+        if crit:
+            p, r = _pr(crit["malicious_closes_caught"], crit["benign_closes_objected_to"], crit["malicious_closes_missed"])
+            add("6 AI critic", "an objection to a close", p, r, "an AI reviewer, no code gates")
+    gl = path("results_dir") / "gap_loop.json"
+    if gl.exists():
+        for r in json.loads(gl.read_text()):
+            if r.get("matches"):
+                add(f"Gap loop draft {r['technique']}", "an event the drafted rule matches",
+                    round((r["matches"] - r["false_positives"]) / r["matches"], 3), r.get("recall"),
+                    "accepted" if r.get("accepted") else "rejected by the backtest")
+    return rows
+
+
 def score(run_names: list[str], repeat_group: list[str] | None = None, write: bool = True, judge=None) -> dict:
     from .grading import grade_run
     labels, by_event, scenarios = load_truth()
@@ -448,6 +523,7 @@ def score(run_names: list[str], repeat_group: list[str] | None = None, write: bo
         runs = [list(read_jsonl(runs_dir / f"{n}.jsonl")) for n in repeat_group if (runs_dir / f"{n}.jsonl").exists()]
         if len(runs) > 1:
             m["consistency"] = consistency(runs, by_event, scenarios, incidents)
+    m["precision_recall"] = precision_recall_summary(m)
     if write:
         (path("results_dir") / "metrics.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
     return m

@@ -18,6 +18,15 @@ flowchart LR
     R --> G["6 Controls<br/>catches vs cost<br/>injection ASR"]
 ```
 
+## At a glance: precision and recall at every stage
+
+`REPORT.md` opens with one table (`metrics.json` → `precision_recall`) giving precision and recall
+for each stage on the same footing: log quality (hours flagged as broken), detection (alerts),
+correlation (incidents vs chains), triage (AI alone, controls v1, controls v2), evidence recall,
+claim precision (faithfulness), RAG (context precision, hit rate), the gates and the AI critic
+(as catchers of AI false closes), and each gap-loop draft. "n/a" means the measure doesn't apply
+(for example, an unrelated event in the evidence is not a mistake, so evidence has no precision).
+
 ## 1. Emulation (is the answer key trustworthy?)
 
 | Metric | Plain meaning | How it's computed | Key | Target |

@@ -19,6 +19,15 @@ def render(m: dict) -> str:
         s += ["> **Backend: stub (rule-based stand-in, not AI).** These numbers only show the pipeline "
               "and controls work. Report results from an `ollama` run.", ""]
 
+    pr = m.get("precision_recall")
+    if pr:
+        s += ["## Precision and recall at every stage",
+              "Precision: of what a stage flagged, how much was right. Recall: of what it should have flagged, "
+              "how much it caught. In triage the positive class is malicious, so a missed attack lowers recall.", "",
+              _table(["Stage", "Positive means", "Precision", "Recall", "Note"],
+                     [[r["stage"], r["positive"], "n/a" if r["precision"] is None else r["precision"],
+                       "n/a" if r["recall"] is None else r["recall"], r["note"]] for r in pr]), ""]
+
     s += ["## 1. Emulation (answer key)", _table(["Metric", "Value"], [
         ["Attack scenarios / benign scenarios", f"{e['attack_scenarios']} / {e['benign_scenarios']}"],
         ["Malicious events", e["malicious_events"]],
