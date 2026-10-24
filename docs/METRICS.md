@@ -18,7 +18,7 @@ flowchart LR
     R --> G["6 Controls<br/>catches vs cost<br/>injection ASR"]
 ```
 
-## At a glance: precision and recall at every stage
+## At a glance: precision, recall, F1 and AUC at every stage
 
 `REPORT.md` opens with one table (`metrics.json` → `precision_recall`) giving precision and recall
 for each stage on the same footing: log quality (hours flagged as broken), detection (alerts),
@@ -137,9 +137,19 @@ ollama` uses a model instead. Gates check what was *stated*, not whether it was 
 Every run reports two "with controls" arms: `assured_v1` (the original gates) and `assured`
 (controls v2 = v1 + the multi-stage chain gate, `gates.multi_stage_min_tactics`). The v2 gate was
 added after the `fp_framing` ablation showed four two-tactic attacks passing every v1 gate. Because
-gates are code, `python -m triage_lab regate` re-applies them to every run from the saved model
-answers in seconds, with no new model calls; a missing answer stops it rather than asking the model.
+gates are code and v2 is exactly v1 plus one gate, `python -m triage_lab regate` applies the extra
+gate to every saved row in seconds, with no model and no saved answers needed, so the result is the
+same on Kaggle and on a laptop.
 Report both arms, and check the v2 gate on the held-out set, which it was not designed against.
+
+## 5f. Ranking and calibration of the AI's confidence
+
+| Metric | Plain meaning | Key | Target |
+|---|---|---|---|
+| AI ROC-AUC / PR-AUC | Does a higher "malicious" score really mean more likely an attack? Score = confidence when it escalates, 1 − confidence when it closes | `triage.<run>.model.ai_roc_auc`, `ai_pr_auc` | 1.0 ideal, 0.5 = chance |
+| Brier score | Mean squared error of that score against the truth | `….ai_brier` | Lower |
+| ECE | Gap between stated confidence and how often it is right | `….ai_ece` | ≈ 0 |
+| Accuracy, specificity, balanced accuracy, false-positive rate | Specificity = share of benign incidents closed (analyst time saved) | `triage.<run>.<arm>.*` | Report; prefer F2 / MCC with unequal classes |
 
 ## 6. Controls, self-correction and adversarial tests
 

@@ -84,3 +84,21 @@ def test_resume_retries_incidents_the_model_never_answered():
     assert model_error({"schema_valid": False, "summary": "MODEL ERROR: timed out"})
     assert not model_error({"schema_valid": False, "summary": "the model wrote prose, not JSON"})
     assert not model_error({"schema_valid": True, "summary": "ok"})
+
+
+def test_regate_adds_only_the_v2_gate_to_saved_rows(tmp_path, monkeypatch):
+    import json
+    from triage_lab import __main__ as cli
+    from triage_lab.config import override
+    override("paths.results_dir", str(tmp_path))
+    (tmp_path / "runs").mkdir()
+    rows = [{"incident_id": "INC-1", "assured": "close", "techniques_detected": ["T1566.002", "T1059.001"],
+             "gate_reasons": []},
+            {"incident_id": "INC-2", "assured": "close", "techniques_detected": ["T1566.002"], "gate_reasons": []},
+            {"incident_id": "INC-3", "assured": "escalate", "techniques_detected": ["T1530"], "gate_reasons": ["x"]}]
+    (tmp_path / "runs" / "r.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    cli._regate()
+    out = [json.loads(l) for l in (tmp_path / "runs" / "r.jsonl").read_text().splitlines()]
+    override("paths.results_dir", "results")
+    assert [r["assured_v1"] for r in out] == ["close", "close", "escalate"]
+    assert [r["assured"] for r in out] == ["escalate", "close", "escalate"]

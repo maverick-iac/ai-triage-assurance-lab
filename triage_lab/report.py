@@ -24,9 +24,11 @@ def render(m: dict) -> str:
         s += ["## Precision and recall at every stage",
               "Precision: of what a stage flagged, how much was right. Recall: of what it should have flagged, "
               "how much it caught. In triage the positive class is malicious, so a missed attack lowers recall.", "",
-              _table(["Stage", "Positive means", "Precision", "Recall", "Note"],
+              _table(["Stage", "Positive means", "Precision", "Recall", "F1", "AUC", "Note"],
                      [[r["stage"], r["positive"], "n/a" if r["precision"] is None else r["precision"],
-                       "n/a" if r["recall"] is None else r["recall"], r["note"]] for r in pr]), ""]
+                       "n/a" if r["recall"] is None else r["recall"],
+                       "n/a" if r.get("f1") is None else r["f1"],
+                       "n/a" if r.get("auc") is None else r["auc"], r["note"]] for r in pr]), ""]
 
     s += ["## 1. Emulation (answer key)", _table(["Metric", "Value"], [
         ["Attack scenarios / benign scenarios", f"{e['attack_scenarios']} / {e['benign_scenarios']}"],
@@ -67,9 +69,18 @@ def render(m: dict) -> str:
             label = {"assured": "assured (controls v2)" if "assured_v1" in t else "assured",
                      "assured_v1": "assured (controls v1)"}.get(arm, arm)
             rows.append([name, label, f"{a['fn']}", f"{a['false_close_rate']} {a['false_close_rate_ci95']}",
-                         f"{a['f2']} {a['f2_ci95']}", a["recall"], a["precision"], a["mcc"], a["escalation_rate"]])
-    s += [_table(["Run", "Arm", "False closes", "False-close rate [95% CI]", "F2 [95% CI]", "Recall",
-                  "Precision", "MCC", "Escalation rate"], rows), ""]
+                         f"{a['f2']} {a['f2_ci95']}", a["f1"], a["recall"], a["precision"], a.get("specificity", ""),
+                         a.get("accuracy", ""), a["mcc"], a["escalation_rate"]])
+    s += [_table(["Run", "Arm", "False closes", "False-close rate [95% CI]", "F2 [95% CI]", "F1", "Recall",
+                  "Precision", "Specificity", "Accuracy", "MCC", "Escalation rate"], rows), "",
+          "Specificity = share of benign incidents closed (the analyst time saved). "
+          "Accuracy is shown for completeness; with unequal classes, prefer F2, MCC and the false-close rate.", ""]
+    s += ["### How well does the AI's confidence rank and calibrate?",
+          _table(["Run", "ROC-AUC", "PR-AUC", "Brier (lower better)", "ECE (lower better)"],
+                 [[n, t["model"].get("ai_roc_auc"), t["model"].get("ai_pr_auc"), t["model"].get("ai_brier"),
+                   t["model"].get("ai_ece")] for n, t in m["triage"].items()]),
+          "", "Score = the AI's confidence when it escalates, 1 - confidence when it closes. ROC-AUC 0.5 = no better "
+              "than chance; ECE = gap between stated confidence and how often it is right.", ""]
 
     for name, t in m["triage"].items():
         mo, sc, g = t["model"], t["self_correction"], t["gates"]

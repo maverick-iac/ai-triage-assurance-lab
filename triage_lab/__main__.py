@@ -11,8 +11,8 @@
   demo                     the demo script
   gaploop                  draft, backtest and refine rules for missed techniques
   cases                    write a readable handover case file per incident (results/cases/<run>/)
-  regate                   re-apply the current gates to every finished run from SAVED answers (no new
-                           model calls; a missing answer stops it), then score
+  regate                   re-apply the current gates (v2 = v1 + multi-stage chain gate) to every finished
+                           run from its saved rows (no model needed), then score
   ingest-windows           add live Atomic Red Team / Sysmon events
   all                      generate + every run + gaploop + score + demo
 
@@ -189,34 +189,32 @@ def _grade(judge_backend) -> None:
 
 
 def _regate() -> None:
-    """Gates are code, so a change to them is re-evaluated against the SAME model answers:
-    every finished run is replayed from results/cache (no model calls) and its rows rewritten."""
-    from .config import override, path
-    from .pipeline import run
+    """Re-apply the gates to every finished run WITHOUT the model: controls v2 is v1 plus the
+    multi-stage chain gate, so each saved row's v1 decision is kept and the extra gate is applied
+    to it. Needs no saved model answers, so it gives the same result on Kaggle and on a laptop."""
+    import json
+
+    from .config import path, settings
     from .schema import read_jsonl
+    tactic = settings()["attack"]["tactic"]
+    need = settings()["gates"].get("multi_stage_min_tactics")
+    v2 = settings()["gates"].get("controls_version", "v1") >= "v2"
     for f in sorted((path("results_dir") / "runs").glob("*.jsonl")):
-        name = f.stem
         rows = list(read_jsonl(f))
-        if not rows:
-            continue
-        base = name.split("__")[0]
-        if base in RUNS:
-            opts = dict(RUNS[base])
-        elif base.startswith("repeat_") and base[7:].isdigit():
-            opts = {"temperature": 0.7, "run_index": int(base[7:])}
-        else:
-            print(f"skip {name}: not a named run")
-            continue
-        kind, _, model = rows[0]["backend"].partition(":")
-        if kind.startswith("stub"):
-            backend = "stub"
-        elif kind == "langflow":
-            backend, model = "langflow", model.split(":", 1)[1]
-        else:
-            backend = "replay"
-        override("agent.model", model)
-        out = run(name, backend, quiet=True, resume=False, **opts)
-        print(f"regated {name}: {len(out)} incidents from saved answers ({backend}, {model})")
+        flipped = 0
+        for r in rows:
+            r.setdefault("assured_v1", r["assured"])
+            reasons = [g for g in r.get("gate_reasons", []) if not g.startswith("multi-stage chain")]
+            assured = r["assured_v1"]
+            tactics = sorted({tactic[t] for t in r.get("techniques_detected", []) if t in tactic})
+            if v2 and need and assured == "close" and len(tactics) >= need:
+                assured = "escalate"
+                reasons.append(f"multi-stage chain: {len(tactics)} ATT&CK tactics ({', '.join(tactics)})")
+                flipped += 1
+            r["assured"], r["gate_reasons"] = assured, reasons
+            r["controls_version"] = "v2" if v2 else "v1"
+        f.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        print(f"regated {f.stem}: {len(rows)} incidents, {flipped} closes escalated by the v2 gate")
 
 
 def _runs(names: list[str], backend, resume: bool, suffix: str = "", limit: int | None = None) -> None:
@@ -241,7 +239,7 @@ def _stage(args, backend) -> None:
     if args.name in STAGES:
         suffix = f"__{_tag(settings()['agent']['model'])}" if args.name == "bigger_model" else ""
         _runs(STAGES[args.name], backend, resume=True, suffix=suffix, limit=args.limit)
-    elif args.name == "regate":                       # no GPU needed: replays saved answers
+    elif args.name == "regate":                       # no GPU, no model: works from the saved rows
         _regate()
     elif args.name == "heldout":                      # data_dir already points at data_heldout/
         _runs(["main"], backend, resume=True, limit=args.limit)

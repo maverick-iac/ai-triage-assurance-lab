@@ -64,6 +64,10 @@ def confusion(pairs: list[tuple[bool, str]]) -> dict:
             "f1": round(fbeta(1), 3), "f2": round(fbeta(2), 3),
             "mcc": round((tp * tn - fp * fn) / denom, 3) if denom else 0.0,
             "false_close_rate": round(fn / (tp + fn), 3) if tp + fn else 0.0,
+            "accuracy": round((tp + tn) / len(pairs), 3) if pairs else 0.0,
+            "specificity": round(tn / (tn + fp), 3) if tn + fp else 0.0,
+            "false_positive_rate": round(fp / (tn + fp), 3) if tn + fp else 0.0,
+            "balanced_accuracy": round(((tp / (tp + fn) if tp + fn else 0) + (tn / (tn + fp) if tn + fp else 0)) / 2, 3),
             "escalation_rate": round((tp + fp) / len(pairs), 3) if pairs else 0.0,
             "auto_close_rate": round((fn + tn) / len(pairs), 3) if pairs else 0.0}
 
@@ -215,6 +219,33 @@ def arms_of(rows: list[dict]) -> list[str]:
             + (["critic_only"] if rows and "critic_only" in rows[0] else []))
 
 
+def ai_score_metrics(rows: list[dict], truth: dict) -> dict:
+    """Ranking and calibration of the AI's own answers. The AI's 'probability of malicious' is its
+    confidence when it escalates and 1 - confidence when it closes; invalid answers count as 0.5.
+    ROC-AUC / PR-AUC: does a higher score really mean more likely an attack? Brier and ECE: when it
+    says 90% sure, is it right about 90% of the time?"""
+    ys, ps = [], []
+    for r in rows:
+        conf = r.get("model_confidence")
+        p = 0.5 if conf is None else (conf if r["model_decision"] == "escalate" else 1 - conf)
+        ys.append(int(truth[r["incident_id"]]["malicious"]))
+        ps.append(min(1.0, max(0.0, float(p))))
+    out = {"ai_brier": round(sum((p - y) ** 2 for p, y in zip(ps, ys)) / len(ys), 3) if ys else None}
+    if len(set(ys)) == 2:
+        out["ai_roc_auc"] = round(roc_auc_score(ys, ps), 3)
+        out["ai_pr_auc"] = round(average_precision_score(ys, ps), 3)
+    bins = defaultdict(list)
+    for r in rows:                                    # calibration of the stated confidence
+        conf = r.get("model_confidence")
+        if conf is not None:
+            right = truth[r["incident_id"]]["malicious"] == (r["model_decision"] == "escalate")
+            bins[min(9, int(float(conf) * 10))].append((float(conf), right))
+    n = sum(len(b) for b in bins.values())
+    out["ai_ece"] = round(sum(abs(sum(c for c, _ in b) / len(b) - sum(k for _, k in b) / len(b)) * len(b)
+                              for b in bins.values()) / n, 3) if n else None
+    return out
+
+
 def triage_metrics(rows: list[dict], by_event, scenarios, incidents, labels=None) -> dict:
     inc_by_id = {i["id"]: i for i in incidents}
     tactic = settings()["attack"]["tactic"]
@@ -260,6 +291,7 @@ def triage_metrics(rows: list[dict], by_event, scenarios, incidents, labels=None
                                                  for r in rows) / len(rows), 3),
         "latency_mean_s": round(sum(r["seconds"] for r in rows) / len(rows), 2),
         "latency_p95_s": sorted(r["seconds"] for r in rows)[int(0.95 * (len(rows) - 1))],
+        **ai_score_metrics(rows, truth),
     }
 
     retried = [r for r in rows if r["retried"]]
@@ -432,8 +464,10 @@ def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
     flagged, how much it caught. Built only from metrics already computed."""
     rows = []
 
-    def add(stage, positive, p, r, note=""):
-        rows.append({"stage": stage, "positive": positive, "precision": p, "recall": r, "note": note})
+    def add(stage, positive, p, r, note="", auc=None):
+        f1 = round(2 * p * r / (p + r), 3) if p is not None and r is not None and p + r else None
+        rows.append({"stage": stage, "positive": positive, "precision": p, "recall": r, "f1": f1, "auc": auc,
+                     "note": note})
 
     lq = m["log_quality"]
     flagged = sum(v["unhealthy_hours"] for v in lq["per_source"].values())
@@ -449,7 +483,8 @@ def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
     rec = (sum(v["recall_with_behavioural"] * n[t] for t, v in d["per_technique"].items()) / sum(n.values())
            if sum(n.values()) else None)
     add("3 Detection", "an alert on a malicious event", round(tp_alerts / alerts, 3) if alerts else None,
-        round(rec, 3) if rec is not None else None, "recall over logged attack events, Sigma + behavioural")
+        round(rec, 3) if rec is not None else None, "recall over logged attack events, Sigma + behavioural; "
+        "AUC = incident risk score PR-AUC", auc=d.get("incident_risk_pr_auc"))
 
     c = m["correlation"]
     add("4 TTP correlation", "an incident that is one whole attack chain",
@@ -462,7 +497,8 @@ def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
         t = tri[name]
         mo = t["model"]
         add(f"5 Triage, AI alone ({name})", "escalate (malicious)", t["baseline"]["precision"], t["baseline"]["recall"],
-            f"F2 {t['baseline']['f2']}, false closes {t['baseline']['fn']}")
+            f"F2 {t['baseline']['f2']}, MCC {t['baseline']['mcc']}, false closes {t['baseline']['fn']}; "
+            f"AUC = ROC-AUC of the AI's confidence", auc=mo.get("ai_roc_auc"))
         if "assured_v1" in t:
             add(f"5 Triage, controls v1 ({name})", "escalate (malicious)", t["assured_v1"]["precision"],
                 t["assured_v1"]["recall"], f"F2 {t['assured_v1']['f2']}, false closes {t['assured_v1']['fn']}")
