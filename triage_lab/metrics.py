@@ -492,7 +492,7 @@ def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
         c["chain_reconstruction_accuracy"], "precision = incidents not glued together; recall = chains kept whole")
 
     tri = m.get("triage", {})
-    name = run if run in tri else ("main" if "main" in tri else next(iter(tri), None))
+    name = run if run in tri else next((n for n in ("main", "main_critic") if n in tri), next(iter(tri), None))
     if name:
         t = tri[name]
         mo = t["model"]

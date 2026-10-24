@@ -37,7 +37,10 @@ def _bar(title: str) -> str:
 
 
 def main(run_name: str = "main") -> str:
-    rows = list(read_jsonl(path("results_dir") / "runs" / f"{run_name}.jsonl"))
+    runs = path("results_dir") / "runs"
+    if run_name == "main" and not (runs / "main.jsonl").exists() and (runs / "main_critic.jsonl").exists():
+        run_name = "main_critic"                       # same main answers, plus the critic
+    rows = list(read_jsonl(runs / f"{run_name}.jsonl"))
     _, by_event, scenarios = load_truth()
     incidents = {i["id"]: i for i in read_jsonl(path("results_dir") / "pipeline" / "incidents.jsonl")}
     full_id = None
