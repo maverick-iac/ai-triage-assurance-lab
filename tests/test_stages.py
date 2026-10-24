@@ -102,3 +102,17 @@ def test_regate_adds_only_the_v2_gate_to_saved_rows(tmp_path, monkeypatch):
     override("paths.results_dir", "results")
     assert [r["assured_v1"] for r in out] == ["close", "close", "escalate"]
     assert [r["assured"] for r in out] == ["escalate", "close", "escalate"]
+
+
+def test_chat_lab_answers_from_saved_runs():
+    from triage_lab.__main__ import main
+    from triage_lab.chatserver import Lab
+    main(["all", "--backend", "stub"])
+    lab = Lab()
+    lab.backend = "stub"
+    assert "You can type" in lab.answer("help")
+    first = next(iter(lab.incidents))
+    out = lab.answer(first)
+    assert first in out and "Truth (answer key)" in out and "AI alone" in out
+    assert "fp_framing" in lab.answer("false positive")
+    assert "Live answer" in lab.answer(f"live {first}")

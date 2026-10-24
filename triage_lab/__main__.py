@@ -19,6 +19,7 @@
 Common options: --backend stub|ollama|replay   --model qwen2.5:7b   --resume
                 --dataset main|heldout|small   (heldout: another seed, never tuned on;
                                                 small: ~27 incidents for a laptop, see docs/LOCAL_LANGFLOW.md)
+  serve                    chat front-end for the demo (LangFlow Playground or any chat UI): http://localhost:8765/ask
   doctor                   check Ollama (and LangFlow flows, with --backend langflow) before a long run
 """
 
@@ -91,6 +92,8 @@ def main(argv: list[str] | None = None) -> None:
     gr.add_argument("--judge", choices=["stub", "ollama"], help="LLM judge for misattribution (default: rules)")
     sub.add_parser("doctor", parents=[common])
     sub.add_parser("regate", parents=[common])
+    sv = sub.add_parser("serve", parents=[common])
+    sv.add_argument("--port", type=int, default=8765)
     d = sub.add_parser("demo", parents=[common])
     d.add_argument("--run", default="main")
     sub.add_parser("gaploop", parents=[common])
@@ -137,6 +140,9 @@ def main(argv: list[str] | None = None) -> None:
         _score()
     if args.cmd == "grade":
         _grade(args.judge)
+    if args.cmd == "serve":
+        from .chatserver import serve
+        serve(args.port, backend)
     if args.cmd == "regate":
         _regate()
         _score()

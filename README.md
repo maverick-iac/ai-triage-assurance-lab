@@ -118,6 +118,10 @@ LangFlow flows on your own laptop with `qwen2.5:3b`, and the lab tests them with
 answer key and controls on a small dataset (about 23 incidents, every scenario type):
 see [docs/LOCAL_LANGFLOW.md](docs/LOCAL_LANGFLOW.md).
 
+**Chat demo:** `python -m triage_lab serve` answers questions about any incident ("INC-0062",
+"false positive", "agentic", "red team") from the saved runs; connect it to a LangFlow Playground
+with `langflow/triage_lab_chat_component.py` (guide: Part F of docs/LOCAL_LANGFLOW.md).
+
 ```bash
 python -m triage_lab doctor --backend langflow                      # Ollama + your flows answering?
 python -m triage_lab stage main --backend langflow --dataset small  # results in results_small/
