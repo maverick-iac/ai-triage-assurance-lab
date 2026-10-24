@@ -30,6 +30,16 @@ def render(m: dict) -> str:
                        "n/a" if r.get("f1") is None else r["f1"],
                        "n/a" if r.get("auc") is None else r["auc"], r["note"]] for r in pr]), ""]
 
+    asr = m.get("attack_success")
+    if asr:
+        s += ["## Red team (MITRE ATLAS): attack success rate",
+              "ASR = share of the targeted real attacks that ended up closed. Lower is better; 0 = every attempt failed.",
+              "", _table(["Attack on the AI", "ATLAS", "Run", "Targets", "ASR: AI alone", "ASR: controls v1",
+                          "ASR: controls v2", "Note"],
+                         [[a["attack"], a["atlas"], a["run"], a["targets"], a["asr_ai_alone"],
+                           "n/a" if a["asr_controls_v1"] is None else a["asr_controls_v1"],
+                           "n/a" if a["asr_controls"] is None else a["asr_controls"], a["note"]] for a in asr]), ""]
+
     s += ["## 1. Emulation (answer key)", _table(["Metric", "Value"], [
         ["Attack scenarios / benign scenarios", f"{e['attack_scenarios']} / {e['benign_scenarios']}"],
         ["Malicious events", e["malicious_events"]],
