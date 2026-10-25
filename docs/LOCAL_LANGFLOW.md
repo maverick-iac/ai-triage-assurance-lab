@@ -266,7 +266,7 @@ python -m triage_lab run --name try3 --limit 3 --backend langflow --dataset smal
 ```
 
 Each line shows `baseline=` (your flow's answer) and `assured=` (after the gates). One incident
-takes about 1–3 minutes on a laptop CPU. In LangFlow you can watch each call arrive (the
+takes about 1 to 3 minutes on a laptop CPU. In LangFlow you can watch each call arrive (the
 flow's logs, or the Playground's message history).
 
 ---
@@ -285,12 +285,12 @@ Add `--backend langflow --dataset small` to every command:
 
 | Order | Command | What it runs | ~Time (3B, CPU) |
 |---|---|---|---|
-| 1 | `python -m triage_lab stage main --backend langflow --dataset small` | main run through `triage-rag` | 40–70 min |
-| 2 | `python -m triage_lab stage ablations --backend langflow --dataset small` | payload_only, no_context, no_rag (`triage-norag`), poisoned_rag (`triage-poisoned`), fp_framing, no_playbook | 4–6 h (overnight) |
-| 3 | `python -m triage_lab stage agentic --backend langflow --dataset small` | agentic + agentic_critic (Python ↔ Ollama tool loop), main_critic (critic through your flow) | 2–4 h |
-| 4 | `python -m triage_lab gaploop --backend langflow --dataset small` | AI drafts detection rules (Ollama directly) | 10–20 min |
-| 5 | `python -m triage_lab stage heldout --backend langflow --dataset small` | main on a second small dataset (another seed) | 40–70 min |
-| 6 (optional) | `python -m triage_lab stage repeat --backend ollama --dataset small` | 3 repeats at temperature 0.7 for pass^k (your flow is fixed at temperature 0, so repeats call Ollama directly) | 2–3 h |
+| 1 | `python -m triage_lab stage main --backend langflow --dataset small` | main run through `triage-rag` | 40 to 70 min |
+| 2 | `python -m triage_lab stage ablations --backend langflow --dataset small` | payload_only, no_context, no_rag (`triage-norag`), poisoned_rag (`triage-poisoned`), fp_framing, no_playbook | 4 to 6 h (overnight) |
+| 3 | `python -m triage_lab stage agentic --backend langflow --dataset small` | agentic + agentic_critic (Python ↔ Ollama tool loop), main_critic (critic through your flow) | 2 to 4 h |
+| 4 | `python -m triage_lab gaploop --backend langflow --dataset small` | AI drafts detection rules (Ollama directly) | 10 to 20 min |
+| 5 | `python -m triage_lab stage heldout --backend langflow --dataset small` | main on a second small dataset (another seed) | 40 to 70 min |
+| 6 (optional) | `python -m triage_lab stage repeat --backend ollama --dataset small` | 3 repeats at temperature 0.7 for pass^k (your flow is fixed at temperature 0, so repeats call Ollama directly) | 2 to 3 h |
 | any time | `python -m triage_lab score --dataset small` | report, case files, Navigator layer | 1 min |
 
 Results land in **`results_small/`** (`REPORT.md`, `cases/`, `navigator_layer.json`) and the
@@ -377,7 +377,7 @@ flowchart LR
 
 **Optional live moment:** start the server with a model (`python -m triage_lab serve --backend
 langflow`, or `--backend ollama`) and type `live INC-0006` or `live INC-0062 false positive`. The
-incident is triaged **now** by your model and checked by the gates. On a laptop it takes 1–3
+incident is triaged **now** by your model and checked by the gates. On a laptop it takes 1 to 3
 minutes, so send it early in the talk and come back to it.
 
 ## Troubleshooting

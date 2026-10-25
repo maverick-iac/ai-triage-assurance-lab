@@ -35,8 +35,8 @@ gantt
 | **Sat 24** | Score; draft the results section | Commit `agentic`, then `gaploop` if time remains | Ablations scored |
 | **Sun 25** | Live emulation in the VM (2-3 Atomic Red Team tests), ingest; re-upload the updated `data` folder with the dataset, or run `ingest-windows` in the notebook | Commit `bigger_model` with `MODEL = "qwen2.5:14b"` | Agentic and critic results scored |
 | **Mon 26** | Final `score`; Navigator layer + screenshot; README results; slides | `heldout`, then `repeat` (optional) | **Results freeze** |
-| **Tue 27** | Rehearse `demo` twice on the laptop (replays saved results); record backup video; push to GitHub | — | Demo runs in under a minute offline |
-| **Wed 28** | Morning check, then **demo** | — | Done |
+| **Tue 27** | Rehearse `demo` twice on the laptop (replays saved results); record backup video; push to GitHub | n/a | Demo runs in under a minute offline |
+| **Wed 28** | Morning check, then **demo** | n/a | Done |
 
 ## If you fall behind
 
