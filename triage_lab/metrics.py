@@ -516,11 +516,14 @@ def precision_recall_summary(m: dict, run: str | None = None) -> list[dict]:
                    t["baseline"]["fn"] - g["false_closes_caught"])
         add("6 Gates (catching AI false closes)", "a close the gates overrule", p, r,
             f"{g['false_closes_caught']} caught, {g['benign_alerts_sent_to_human_by_gates']} benign sent to a human")
-        crit = next((tri[n]["critic"] for n in ("main_critic", "agentic_critic", name) if n in tri and "critic" in tri[n]),
-                    None)
-        if crit:
-            p, r = _pr(crit["malicious_closes_caught"], crit["benign_closes_objected_to"], crit["malicious_closes_missed"])
-            add("6 AI critic", "an objection to a close", p, r, "an AI reviewer, no code gates")
+        for cn in ("main_critic", "agentic_critic"):
+            if cn in tri and "critic" in tri[cn]:
+                crit = tri[cn]["critic"]
+                p, r = _pr(crit["malicious_closes_caught"], crit["benign_closes_objected_to"],
+                           crit["malicious_closes_missed"])
+                add(f"6 AI critic ({cn})", "an objection to a close", p, r,
+                    f"an AI reviewer, no code gates: caught {crit['malicious_closes_caught']} of "
+                    f"{crit['malicious_closes_caught'] + crit['malicious_closes_missed']} AI false closes")
     gl = path("results_dir") / "gap_loop.json"
     if gl.exists():
         for r in json.loads(gl.read_text()):
@@ -595,8 +598,10 @@ def score(run_names: list[str], repeat_group: list[str] | None = None, write: bo
                                                            judge, write=write)
     m["paired"] = {}
     main_f = runs_dir / "main.jsonl"
+    if not main_f.exists():
+        main_f = runs_dir / "main_critic.jsonl"         # same main answers, plus the critic
     for other in ("fp_framing", "no_playbook"):
-        if other in run_names and main_f.exists() and (runs_dir / f"{other}.jsonl").exists():
+        if other in run_names and main_f.exists() and main_f.stem in run_names and (runs_dir / f"{other}.jsonl").exists():
             m["paired"][f"{other}_vs_main"] = paired_flips(list(read_jsonl(main_f)),
                                                            list(read_jsonl(runs_dir / f"{other}.jsonl")),
                                                            incidents, by_event, scenarios)
