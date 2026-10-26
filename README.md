@@ -52,11 +52,20 @@ The usual answer is "the model will get better" or "add an AI reviewer". This pr
 
 ![Lab architecture: AI zone, trusted code, evaluation](docs/architecture.png)
 
-The LangFlow build of the same design (laptop, qwen2.5:3b):
-
-![LangFlow architecture](docs/langflow_architecture.png)
-
 The model sits in the untrusted zone: it reads the incident and its knowledge notes and returns a recommendation with claims. Everything that decides runs in plain Python the model cannot reach. The verifier checks each claim against the raw events, and the gates read facts the code checks itself, never the model's reasoning. The same pipeline runs with qwen2.5 on Ollama in a Kaggle notebook (all reported results) or through LangFlow flows on a laptop with a 3B model (the live chat demo). Every run is saved, so new gates can be re-applied to old answers without calling the model again.
+
+### 2.1 LangFlow build
+
+![LangFlow architecture: the model runs in LangFlow, the decision stays in Python](docs/langflow_architecture.png)
+
+I also built the AI side of the lab in LangFlow on my laptop, with qwen2.5:3b on Ollama:
+
+- **Load notes** splits the six analyst notes in `knowledge/` and stores them in Chroma (`triage_notes`), embedded with `nomic-embed-text`. Re-run with the planted note, it builds `triage_notes_poisoned`.
+- **triage-rag** is the triage agent: Chat Input → Chroma search (top 3) → Parser → Prompt → Ollama → Chat Output.
+- **triage-norag** and **triage-poisoned** are copies used by the no-RAG and poisoned-RAG tests.
+- **Demo chat** uses a custom component (`langflow/triage_lab_chat_component.py`) to ask the lab's chat server about any incident.
+
+The Python lab calls each flow through the LangFlow API (`POST /api/v1/run/<flow>`), then applies the same verifier and gates to the answer, so the LangFlow agent is graded against the same answer key as the Kaggle runs. Setup steps: [docs/LOCAL_LANGFLOW.md](docs/LOCAL_LANGFLOW.md).
 
 ## 3. Dataset and answer key
 
