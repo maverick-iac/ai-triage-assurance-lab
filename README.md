@@ -4,7 +4,7 @@ Ankit Malhotra · October 2026
 
 Capstone project, AI for Cybersecurity (The Cyber Instructor, September 2026 cohort).
 
-> This README is the capstone report. Code, notebook and run instructions are below the report, under [Run it yourself](#run-it-yourself). Results files: `results/` after a run; the submitted results are in the capstone archive.
+> This README is the capstone report ([PDF version](docs/capstone_report.pdf)). The results it reports are in [results/final/](results/final/): the full metrics report, the held-out report and sample case files. Code, notebook and run instructions are under [Run it yourself](#run-it-yourself).
 
 ## Summary
 

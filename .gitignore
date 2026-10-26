@@ -22,3 +22,7 @@ data_small/
 data_small_heldout/
 results_small/
 results_small_heldout/
+
+# local run outputs (the submitted Kaggle results live in results/final/)
+results/*
+!results/final/
