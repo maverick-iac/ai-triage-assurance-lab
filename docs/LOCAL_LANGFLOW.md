@@ -121,6 +121,10 @@ Use a separate PowerShell window for the project and for LangFlow (if you used W
 
 ---
 
+## The architecture at a glance
+
+![LangFlow architecture](langflow_architecture.png)
+
 ## Part B: Build your RAG in LangFlow (about 1 hour)
 
 RAG means the model gets a few relevant analyst notes with each incident. You'll make two

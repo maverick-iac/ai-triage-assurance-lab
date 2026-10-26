@@ -52,6 +52,10 @@ The usual answer is "the model will get better" or "add an AI reviewer". This pr
 
 ![Lab architecture: AI zone, trusted code, evaluation](docs/architecture.png)
 
+The LangFlow build of the same design (laptop, qwen2.5:3b):
+
+![LangFlow architecture](docs/langflow_architecture.png)
+
 The model sits in the untrusted zone: it reads the incident and its knowledge notes and returns a recommendation with claims. Everything that decides runs in plain Python the model cannot reach. The verifier checks each claim against the raw events, and the gates read facts the code checks itself, never the model's reasoning. The same pipeline runs with qwen2.5 on Ollama in a Kaggle notebook (all reported results) or through LangFlow flows on a laptop with a 3B model (the live chat demo). Every run is saved, so new gates can be re-applied to old answers without calling the model again.
 
 ## 3. Dataset and answer key
